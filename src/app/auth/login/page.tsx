@@ -1,19 +1,66 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authService } from '../../../services/auth';
 import { useAuthStore } from '../../../store/auth';
+import { getRedirectPath, clearRedirectPath, setRedirectPath } from '../../../lib/auth-utils';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [redirectTarget, setRedirectTarget] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const isRedirecting = useRef<boolean>(false);
   
   const router = useRouter();
   const { setUser } = useAuthStore();
+
+  // Check if already logged in on component mount and get redirect target
+  useEffect(() => {
+    const checkAuthAndRedirect = async () => {
+      // Avoid running this effect if we're already in a redirection process
+      if (isRedirecting.current) return;
+      
+      console.log('Login page: Checking auth state...');
+      
+      // Check for redirect target first, before any redirects happen
+      const savedRedirectPath = getRedirectPath();
+      if (savedRedirectPath) {
+        console.log('Found saved redirect path:', savedRedirectPath);
+        setRedirectTarget(savedRedirectPath);
+      }
+      
+      // Check if user is already authenticated
+      try {
+        const isAuthenticated = await authService.isAuthenticated();
+        
+        if (isAuthenticated) {
+          console.log('User already logged in, redirecting');
+          isRedirecting.current = true;
+          
+          // Navigate to either the saved redirect path or default to /app
+          const target = savedRedirectPath || '/app';
+          
+          // Clean up the stored redirect path
+          clearRedirectPath();
+          
+          // Use window.location for a full page navigation to break any potential loops
+          window.location.href = target;
+          return;
+        }
+      } catch (error) {
+        console.log('User not authenticated:', error);
+      }
+      
+      setIsCheckingAuth(false);
+    };
+
+    checkAuthAndRedirect();
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,26 +68,63 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
+      // Mark that we're starting the login process
+      isRedirecting.current = false;
+      
+      console.log('Login page: Starting login process...');
       const result = await authService.login({ email, password });
+      console.log('Login page: Login successful, got response:', result.user?.id);
+      
+      // With cookie-based auth, we don't expect a token in the response
+      // The server sets the authentication cookie automatically
+      
+      // Update user state
       setUser(result.user);
-      router.push('/app');
+      console.log('Login page: User state updated');
+      
+      // Get redirect destination
+      const target = redirectTarget || getRedirectPath() || '/app';
+      console.log(`Login page: Login successful, redirecting to: ${target}`);
+      
+      // Clean up the stored redirect path
+      clearRedirectPath();
+      
+      // Mark that we're starting the redirection to prevent loops
+      isRedirecting.current = true;
+
+      // Use window.location for a hard navigation instead of router.push
+      // This will reload the page and create a fresh React context
+      window.location.href = target;
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Login failed');
+      console.error('Login error:', err);
+      setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
+      isRedirecting.current = false;
     } finally {
-      setIsLoading(false);
+      if (!isRedirecting.current) {
+        setIsLoading(false);
+      }
     }
   };
+
+  // Show loading spinner while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <div className="h-screen bg-primary flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-primary flex items-center justify-center">
       <div className="max-w-md w-full mx-auto p-6">
         <div className="bg-background-secondary rounded-2xl p-8 shadow-sm">
           <h1 className="text-3xl font-bold text-text-primary text-center mb-8">
-            Sign In to <span className="text-accent">Refery AI</span>
+            Sign In to <span className="text-accent">RefDoc AI</span>
           </h1>
 
           {error && (
-            <div className="bg-red-500 bg-opacity-20 border border-red-500 text-red-500 rounded-lg p-3 mb-6">
+            <div className="bg-red-500 bg-opacity-20 border text-white border-red-500 rounded-lg p-3 mb-6">
               {error}
             </div>
           )}

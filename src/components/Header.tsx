@@ -55,7 +55,7 @@ export default function Header() {
   return (
     <header className="bg-background-header p-4 flex justify-between items-center shadow-sm z-10">
       <div className="flex items-center">
-        <div className="text-xl font-bold text-accent mr-8">Refery AI</div>
+        <div className="text-xl font-bold text-accent mr-8">RefDoc AI</div>
         
         <div className="flex items-center space-x-4">
           <button

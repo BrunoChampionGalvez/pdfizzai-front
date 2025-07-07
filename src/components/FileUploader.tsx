@@ -2,7 +2,9 @@
 
 import { useState, useRef } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
+import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { fileSystemService } from '../services/filesystem';
+import api from '../lib/api';
 
 interface FileUploaderProps {
   folderId?: string | null;
@@ -15,6 +17,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentFolderId, addFile } = useFileSystemStore();
+  const { triggerExtraction } = usePDFViewer();
   
   const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
 
@@ -46,6 +49,28 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
           targetFolderId || undefined
         );
         addFile(uploadedFile);
+        
+        // Check if this is a PDF file that needs extraction
+        if (file.type === 'application/pdf' && uploadedFile) {
+          console.log('Setting up PDF extraction for:', uploadedFile.id);
+          
+          // Try to construct the file URL - we'll need to fetch the file details to get the storage_path
+          try {
+            // Fetch the complete file information
+            const response = await api.get(`/api/files/${uploadedFile.id}`);
+            const fileDetails = response.data;
+            if (fileDetails && fileDetails.storage_path && !fileDetails.textExtracted) {
+              const fileUrl = `https://storage.googleapis.com/refdoc-ai-bucket/${fileDetails.storage_path}`;
+              
+              // Trigger extraction
+              triggerExtraction(uploadedFile.id, fileUrl);
+              
+              console.log('PDF extraction will begin for:', fileUrl);
+            }
+          } catch (error) {
+            console.error('Failed to fetch file details for extraction:', error);
+          }
+        }
       }
 
       clearInterval(interval);

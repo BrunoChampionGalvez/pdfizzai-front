@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useChatStore } from '../store/chat';
 import { useFileSystemStore } from '../store/filesystem';
+import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { File as FileType, fileSystemService } from '../services/filesystem';
 import { formatFileSize } from '../lib/utils';
 import Modal from './Modal';
+import { LoadingIcon } from './ChatPane';
+import api from '../lib/api';
 
 interface FileListProps {
   files: FileType[];
@@ -13,17 +16,59 @@ interface FileListProps {
 
 export default function FileList({ files }: FileListProps) {
   const { setCurrentReference } = useChatStore();
-  const { removeFile, addFile } = useFileSystemStore();
+  const { handleShowFile, setFileListRefreshHandler, triggerExtraction } = usePDFViewer();
+  const { removeFile, currentFolderId, setFiles } = useFileSystemStore();
   const [draggedFile, setDraggedFile] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<FileType | null>(null);
   
-  const handleFileClick = (file: FileType) => {
+  // Register the file refresh handler when component mounts
+  useEffect(() => {
+    const refreshFiles = async () => {
+      try {
+        console.log('Refreshing files in current folder after extraction completion');
+        const { files: updatedFiles } = await fileSystemService.getFolders(currentFolderId || undefined);
+        setFiles(updatedFiles);
+      } catch (error) {
+        console.error('Failed to refresh files:', error);
+      }
+    };
+    
+    setFileListRefreshHandler(refreshFiles);
+    
+    // Cleanup on unmount
+    return () => {
+      setFileListRefreshHandler(() => {});
+    };
+  }, [setFileListRefreshHandler, currentFolderId, setFiles]);
+  
+  const handleFileClick = async (file: FileType) => {
+    // Set the current reference in the chat store for layout management
     setCurrentReference({
       fileId: file.id,
       page: 1,
       text: ''
     });
+    
+    // Show the file in the PDF viewer
+    await handleShowFile(file.id, '');
+    
+    // Check if this is a PDF file that needs extraction
+    if (file.mime_type === 'application/pdf') {
+      try {
+        // Fetch the complete file information to check if extraction is needed
+        const response = await api.get(`/api/files/${file.id}`);
+        const fileDetails = response.data;
+        
+        if (fileDetails && fileDetails.storage_path && !fileDetails.textExtracted) {
+          console.log('PDF file needs extraction, triggering extraction for:', file.id);
+          const fileUrl = `https://storage.googleapis.com/refdoc-ai-bucket/${fileDetails.storage_path}`;
+          triggerExtraction(file.id, fileUrl);
+        }
+      } catch (error) {
+        console.error('Failed to check file extraction status:', error);
+      }
+    }
   };
 
   // Drag handlers for files
@@ -35,7 +80,7 @@ export default function FileList({ files }: FileListProps) {
     const file = files.find(f => f.id === fileId);
     if (file) {
       const ghostElement = document.createElement('div');
-      ghostElement.textContent = file.filename;
+      ghostElement.textContent = file.filename ?? 'File loading...';
       ghostElement.className = 'bg-background-secondary text-text-primary p-2 rounded-md border border-accent';
       document.body.appendChild(ghostElement);
       e.dataTransfer.setDragImage(ghostElement, 0, 0);
@@ -108,7 +153,7 @@ export default function FileList({ files }: FileListProps) {
       >
         <div className="space-y-4">
           <p className="text-sm text-text-primary">
-            Are you sure you want to delete the file "{fileToDelete?.filename}"? This action cannot be undone.
+            Are you sure you want to delete the file "{fileToDelete?.filename ?? 'File loading.'}"? This action cannot be undone.
           </p>
           <div className="flex justify-end space-x-2">
             <button
@@ -153,7 +198,7 @@ function FileItem({
     
     // Create a custom ghost image
     const ghostElement = document.createElement('div');
-    ghostElement.textContent = file.filename;
+    ghostElement.textContent = file.filename ?? 'File loading...';
     ghostElement.className = 'bg-background-secondary text-text-primary p-2 rounded-md border border-accent w-max';
     document.body.appendChild(ghostElement);
     e.dataTransfer.setDragImage(ghostElement, 0, 0);
@@ -180,10 +225,17 @@ function FileItem({
       onDragStart={handleDragStart}
       onDragEnd={onDragEnd}
     >
-      <FileIcon />
+      {file.filename && <FileIcon />}
       <div className="ml-2 flex-1 min-w-0">
         <div className="flex justify-between items-center">
-          <span className="text-sm truncate text-text-primary">{file.filename}</span>
+          {file.filename && file.filename.trim() !== '' ? (
+            <span className="text-sm truncate text-text-primary">{file.filename}</span>
+          ) : (
+            <span className="text-sm flex items-center text-text-primary">
+              <LoadingIcon />
+              <span className='ml-2'>File loading...</span>
+            </span>
+          )}
           <div className="flex items-center">
             <span className="text-xs text-text-secondary mr-2 opacity-0 group-hover:opacity-100 transition-opacity">
               {formatFileSize(file.size_bytes)}

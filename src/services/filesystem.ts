@@ -54,4 +54,20 @@ export const fileSystemService = {
   getFileDownloadUrl(fileId: string): string {
     return `${api.defaults.baseURL}/api/files/${fileId}/download`;
   },
+
+  // New methods for @ functionality
+  async getAllFiles(): Promise<File[]> {
+    const response = await api.get('/api/files');
+    return response.data;
+  },
+
+  async getAllFolders(): Promise<Folder[]> {
+    const response = await api.get('/api/folders', { params: { all: 'true' } });
+    return response.data;
+  },
+
+  async getFileById(fileId: string): Promise<File> {
+    const response = await api.get(`/api/files/${fileId}`);
+    return response.data;
+  },
 };

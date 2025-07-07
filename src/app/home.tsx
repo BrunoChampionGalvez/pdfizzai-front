@@ -35,7 +35,7 @@ export default function Home() {
     <div className="h-screen bg-primary flex items-center justify-center">
       <div className="max-w-4xl mx-auto px-6 text-center">
         <h1 className="text-5xl font-bold text-text-primary mb-8">
-          Welcome to <span className="text-accent">Refery AI</span>
+          Welcome to <span className="text-accent">RefDoc AI</span>
         </h1>
         
         <p className="text-xl text-secondary mb-12 max-w-2xl mx-auto">

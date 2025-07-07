@@ -3,31 +3,20 @@
 import { useState, useEffect } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
 import { fileSystemService } from '../services/filesystem';
+import { useUIStore } from '../store/ui';
 import FolderTree from './FolderTree';
 import FileUploader from './FileUploader';
 
 export default function Sidebar() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const { isSidebarCollapsed, setSidebarCollapsed } = useUIStore();
   const { currentFolderId, addFolder } = useFileSystemStore();
 
   // Function to handle sidebar collapse/expand
   const toggleSidebar = () => {
-    setIsSidebarCollapsed(!isSidebarCollapsed);
+    setSidebarCollapsed(!isSidebarCollapsed);
   };
-
-  // Store sidebar state in localStorage
-  useEffect(() => {
-    const storedState = localStorage.getItem('sidebarCollapsed');
-    if (storedState) {
-      setIsSidebarCollapsed(storedState === 'true');
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('sidebarCollapsed', isSidebarCollapsed.toString());
-  }, [isSidebarCollapsed]);
 
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();

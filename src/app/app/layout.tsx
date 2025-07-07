@@ -7,6 +7,7 @@ import { authService } from '../../services/auth';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import ErrorBoundary from '../../components/ErrorBoundary';
+import { PDFViewerProvider } from '../../contexts/PDFViewerContext';
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, setUser, setLoading } = useAuthStore();
@@ -44,14 +45,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col h-full bg-primary">
       <Header />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 overflow-auto">
-          <ErrorBoundary>
-            {children}
-          </ErrorBoundary>
-        </main>
-      </div>
+      <PDFViewerProvider>
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-auto">
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
+          </main>
+        </div>
+      </PDFViewerProvider>
     </div>
   );
 }

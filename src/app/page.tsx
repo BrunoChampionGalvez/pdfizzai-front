@@ -2,40 +2,44 @@
 
 import Link from 'next/link';
 import { useAuthStore } from '../store/auth';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { authService } from '../services/auth';
-import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  const { isAuthenticated, setUser, setLoading } = useAuthStore();
-  const router = useRouter();
+  const { user, setUser } = useAuthStore();
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        setLoading(true);
-        const user = await authService.getMe();
-        setUser(user);
-        router.push('/app');
+        // Only check auth status, don't auto-redirect
+        const currentUser = await authService.getMe();
+        setUser(currentUser);
       } catch (error) {
+        // User not authenticated, which is fine for landing page
         setUser(null);
       } finally {
-        setLoading(false);
+        setIsCheckingAuth(false);
       }
     };
 
     checkAuth();
-  }, [setUser, setLoading, router]);
+  }, [setUser]);
 
-  if (isAuthenticated) {
-    return null; // Will redirect to /app
+  // Show loading spinner while checking auth
+  if (isCheckingAuth) {
+    return (
+      <div className="h-screen bg-primary flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
+      </div>
+    );
   }
 
   return (
     <div className="h-screen bg-primary flex items-center justify-center">
       <div className="max-w-4xl mx-auto px-6 text-center">
         <h1 className="text-5xl font-bold text-text-primary mb-8">
-          Welcome to <span className="text-accent">Refery AI</span>
+          Welcome to <span className="text-accent">RefDoc AI</span>
         </h1>
         
         <p className="text-xl text-secondary mb-12 max-w-2xl mx-auto">
@@ -44,19 +48,32 @@ export default function Home() {
         </p>
 
         <div className="space-y-4 sm:space-y-0 sm:space-x-4 sm:flex sm:justify-center">
-          <Link
-            href="/auth/signup"
-            className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
-          >
-            Get Started
-          </Link>
-          
-          <Link
-            href="/auth/login"
-            className="inline-block bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
-          >
-            Sign In
-          </Link>
+          {user ? (
+            // Show app access for authenticated users
+            <Link
+              href="/app"
+              className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
+            >
+              Go to App
+            </Link>
+          ) : (
+            // Show signup/login for non-authenticated users
+            <>
+              <Link
+                href="/auth/signup"
+                className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
+              >
+                Get Started
+              </Link>
+              
+              <Link
+                href="/auth/login"
+                className="inline-block bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
+              >
+                Sign In
+              </Link>
+            </>
+          )}
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">

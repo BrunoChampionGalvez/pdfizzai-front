@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { PDFViewerProvider } from "../contexts/PDFViewerContext";
+import AuthGuard from "../components/AuthGuard";
 
 export const metadata: Metadata = {
-  title: "Refery AI - AI-Powered PDF Chat",
+  title: "RefDoc AI - AI-Powered PDF Chat",
   description: "Upload PDFs and chat with AI about their contents",
 };
 
@@ -14,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="h-screen bg-primary text-text-primary">
-        {children}
+        <PDFViewerProvider>
+          <AuthGuard>{children}</AuthGuard>
+        </PDFViewerProvider>
       </body>
     </html>
   );

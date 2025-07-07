@@ -1,14 +1,21 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chat';
+import { useUIStore } from '../store/ui';
+import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { chatService } from '../services/chat';
+import { fileSystemService } from '../services/filesystem';
 import { generateId } from '../lib/utils';
 import MessageBubble from './MessageBubble';
+import { MentionedMaterial, StudyMaterial } from '../types/chat';
+import { useRouter } from 'next/navigation';
+import { extractErrorMessage, isAuthError } from '../types/errors';
 
 export default function ChatPane() {
   const [message, setMessage] = useState('');
   const [isNewSession, setIsNewSession] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { 
     currentSessionId, 
     messages, 
@@ -16,9 +23,30 @@ export default function ChatPane() {
     setMessages, 
     setCurrentSessionId,
     isLoading, 
-    setLoading
+    setLoading,
+    currentReference,
+    updateMessage,
+    updateMessageContent
   } = useChatStore();
+  const { isSidebarCollapsed } = useUIStore();
+  const { showFileDisplay } = usePDFViewer();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+  
+  // @ functionality state
+  const [showMentionSearch, setShowMentionSearch] = useState(false);
+  const [mentionSearchQuery, setMentionSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<StudyMaterial[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedMaterials, setSelectedMaterials] = useState<MentionedMaterial[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+  
+  // Handle initial animation
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   
   // Load chat history when session changes
   useEffect(() => {
@@ -29,8 +57,15 @@ export default function ChatPane() {
           const history = await chatService.getChatHistory(currentSessionId);
           setMessages(history);
           setIsNewSession(false);
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('Failed to load chat history', error);
+          if (isAuthError(error)) {
+            // Auth error will be handled by the API interceptor
+            setErrorMessage('Session expired. Please log in again.');
+          } else {
+            // Set error message for other errors
+            setErrorMessage(extractErrorMessage(error));
+          }
         } finally {
           setLoading(false);
         }
@@ -41,106 +76,527 @@ export default function ChatPane() {
     };
 
     loadChatHistory();
-  }, [currentSessionId, setMessages, setLoading]);
+  }, [currentSessionId, setMessages, setLoading, router]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Focus search input when search is shown
+  useEffect(() => {
+    if (showMentionSearch && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [showMentionSearch]);
+
+  // Handle click outside to close search results
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        searchResultsRef.current && 
+        !searchResultsRef.current.contains(event.target as Node) &&
+        event.target instanceof Node &&
+        !((event.target as HTMLElement).classList?.contains('mention-trigger'))
+      ) {
+        setShowMentionSearch(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Search study materials function
+  const searchStudyMaterials = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    
+    try {
+      // Fetch all files and folders
+      const [files, folders] = await Promise.all([
+        fileSystemService.getAllFiles(),
+        fileSystemService.getAllFolders()
+      ]);
+
+      // Build folder paths map for hierarchy
+      const folderPathsMap = new Map<string, string[]>();
+      const buildFolderPath = (folderId: string, visitedIds = new Set<string>()): string[] => {
+        if (visitedIds.has(folderId)) {
+          return []; // Prevent infinite recursion
+        }
+        visitedIds.add(folderId);
+        
+        const folder = folders.find(f => f.id === folderId);
+        if (!folder) return [];
+        
+        if (folder.parent_id) {
+          const parentPath = folderPathsMap.get(folder.parent_id) || buildFolderPath(folder.parent_id, visitedIds);
+          const fullPath = [...parentPath, folder.name];
+          folderPathsMap.set(folderId, fullPath);
+          return fullPath;
+        }
+        
+        folderPathsMap.set(folderId, [folder.name]);
+        return [folder.name];
+      };
+
+      // Build paths for all folders
+      folders.forEach(folder => {
+        if (!folderPathsMap.has(folder.id)) {
+          buildFolderPath(folder.id);
+        }
+      });
+
+      // Convert to StudyMaterial format
+      const allMaterials: StudyMaterial[] = [
+        ...folders.map(folder => ({
+          id: folder.id,
+          name: folder.name,
+          type: 'folder' as const,
+          path: folderPathsMap.get(folder.id) || [folder.name],
+        })),
+        ...files.map(file => {
+          let filePath = [file.filename];
+          if (file.folder_id) {
+            const folderPath = folderPathsMap.get(file.folder_id) || [];
+            filePath = [...folderPath, file.filename];
+          }
+          return {
+            id: file.id,
+            name: file.filename,
+            type: 'file' as const,
+            path: filePath,
+          };
+        }),
+      ];
+
+      // Filter based on search query
+      const searchTerm = query.toLowerCase();
+      const filtered = allMaterials.filter(material => 
+        material.name.toLowerCase().includes(searchTerm)
+      );
+
+      // Sort results by relevance (exact matches first, then contains)
+      filtered.sort((a, b) => {
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        
+        if (aName === searchTerm && bName !== searchTerm) return -1;
+        if (bName === searchTerm && aName !== searchTerm) return 1;
+        
+        if (aName.startsWith(searchTerm) && !bName.startsWith(searchTerm)) return -1;
+        if (bName.startsWith(searchTerm) && !aName.startsWith(searchTerm)) return 1;
+        
+        return aName.localeCompare(bName);
+      });
+
+      setSearchResults(filtered.slice(0, 10)); // Limit to 10 results
+    } catch (error: unknown) {
+      console.error('Error searching study materials:', error);
+      setSearchResults([]);
+      if (isAuthError(error)) {
+        setErrorMessage('Session expired. Please log in again.');
+      } else {
+        setErrorMessage(extractErrorMessage(error));
+      }
+    } finally {
+      setIsSearching(false);
+    }
+  }, [router]);
+
+  // Handle search input change
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setMentionSearchQuery(query);
+    
+    // When the user first interacts with the search bar, remove the @ from the chat input
+    if (!mentionSearchQuery && query) {
+      const lastAtPos = message.lastIndexOf('@');
+      if (lastAtPos !== -1) {
+        const messageAfterAt = message.slice(lastAtPos + 1).trim();
+        if (messageAfterAt === '') {
+          const newMessage = message.slice(0, lastAtPos) + ' ';
+          setMessage(newMessage.trimEnd());
+        }
+      }
+    }
+    
+    searchStudyMaterials(query);
+  };
+
+  // Handle selection of a study material
+  const handleSelectMaterial = (material: StudyMaterial) => {
+    const mentionedMaterial: MentionedMaterial = {
+      id: material.id,
+      displayName: material.path?.join('/') || material.name,
+      type: material.type,
+      originalName: material.name,
+    };
+    
+    // Check if this material is already selected
+    if (selectedMaterials.some(m => m.id === mentionedMaterial.id)) {
+      return;
+    }
+    
+    // Add to selected materials
+    setSelectedMaterials(prev => [...prev, mentionedMaterial]);
+    
+    // Clear search
+    setMentionSearchQuery('');
+    setShowMentionSearch(false);
+    setSearchResults([]);
+  };
+
+  // Handle keydown in search input
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && searchResults.length > 0) {
+      e.preventDefault();
+      handleSelectMaterial(searchResults[0]);
+    } else if (e.key === 'Escape') {
+      setShowMentionSearch(false);
+    }
+  };
+
+  // Handle removing a selected material
+  const handleRemoveMaterial = (id: string) => {
+    setSelectedMaterials(prev => prev.filter(material => material.id !== id));
+  };
+
+  // Toggle mention search
+  const toggleMentionSearch = () => {
+    setShowMentionSearch(prev => !prev);
+    if (!showMentionSearch) {
+      setMentionSearchQuery('');
+      setSearchResults([]);
+    }
+  };
+
+  // Handle message change with @ detection
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newMessage = e.target.value;
+    setMessage(newMessage);
+    
+    // Clear any previous error messages when user starts typing again
+    if (errorMessage) {
+      setErrorMessage(null);
+    }
+    
+    // Check if the user just typed @
+    const lastAtPos = newMessage.lastIndexOf('@');
+    if (lastAtPos !== -1 && (lastAtPos === 0 || newMessage[lastAtPos - 1] === ' ')) {
+      const charAfterAt = newMessage.charAt(lastAtPos + 1);
+      if (charAfterAt === ' ') {
+        setShowMentionSearch(false);
+        return;
+      }
+      
+      const searchQuery = newMessage.slice(lastAtPos + 1).split(' ')[0];
+      if (searchQuery) {
+        setMentionSearchQuery(searchQuery);
+        searchStudyMaterials(searchQuery);
+        setShowMentionSearch(true);
+      } else {
+        setShowMentionSearch(true);
+        setMentionSearchQuery('');
+        setSearchResults([]);
+      }
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) return;
+    
+    // Clear any previous error messages
+    setErrorMessage(null);
 
     try {
       // Create a new chat session if needed
-      if (!currentSessionId) {
+      let sessionId = currentSessionId;
+      if (!sessionId) {
         setLoading(true);
         const newSession = await chatService.createSession();
         setCurrentSessionId(newSession.id);
+        sessionId = newSession.id;
+      }
+
+      // Ensure we have a valid session ID
+      if (!sessionId) {
+        throw new Error('Failed to create or retrieve chat session');
+      }
+
+      // Clean message content - remove @ mentions that are now selected materials
+      let cleanedMessage = message;
+      if (selectedMaterials.length > 0) {
+        selectedMaterials.forEach(material => {
+          const patterns = [
+            new RegExp(`@${material.displayName}\\b`, 'g'),
+            new RegExp(`@${material.originalName.replace(/ /g, '_')}\\b`, 'g')
+          ];
+          
+          patterns.forEach(pattern => {
+            cleanedMessage = cleanedMessage.replace(pattern, '');
+          });
+        });
+        
+        cleanedMessage = cleanedMessage.replace(/\s+/g, ' ').trim();
       }
 
       const currentTime = new Date().toISOString();
-      // Add user message immediately
+      // Add user message immediately with cleaned content and selected materials
       const userMessage = {
         id: generateId(),
         role: 'user' as const,
-        content: message,
-        timestamp: currentTime
+        content: cleanedMessage,
+        timestamp: currentTime,
+        selectedMaterials: selectedMaterials.length > 0 ? [...selectedMaterials] : undefined,
       };
       addMessage(userMessage);
       setMessage('');
 
+      // Create AI message placeholder for streaming
+      const aiMessageId = generateId();
+      const aiMessage = {
+        id: aiMessageId,
+        role: 'assistant' as const,
+        content: '', // Start with empty content
+        timestamp: new Date().toISOString(),
+        references: []
+      };
+      addMessage(aiMessage);
+
       // Show assistant is typing
       setLoading(true);
       
-      // Send message to API
-      const response = await chatService.sendMessage(
-        currentSessionId!, 
-        message
-      );
+      // Extract IDs from selected materials
+      const fileIds = selectedMaterials
+        .filter(material => material.type === 'file')
+        .map(material => material.id);
+        
+      const folderIds = selectedMaterials
+        .filter(material => material.type === 'folder')
+        .map(material => material.id);
       
-      // Add AI response
-      const aiMessage = {
-        id: generateId(),
-        role: 'assistant' as const,
-        content: response.reply,
-        timestamp: new Date().toISOString(),
-        references: response.references
+      // Use streaming to update the AI message in real-time
+      const handleStreaming = async () => {
+        let accumulatedContent = '';
+        
+        try {
+          let lastUpdateTime = Date.now();
+          const THROTTLE_MS = 50; // Update every 50ms to prevent too frequent renders
+          
+          for await (const chunk of chatService.sendMessageStream(
+            sessionId, // Use the local sessionId variable
+            cleanedMessage,
+            fileIds,
+            folderIds
+          )) {
+            // Only process if chunk has content
+            if (chunk) {
+              accumulatedContent += chunk;
+              const now = Date.now();
+              
+              // Throttle updates to prevent infinite re-renders
+              if (now - lastUpdateTime > THROTTLE_MS) {
+                // Update the message with the accumulated content so far
+                updateMessage(aiMessageId, accumulatedContent);
+                lastUpdateTime = now;
+              }
+            }
+          }
+          
+          // Send final accumulated content
+          updateMessage(aiMessageId, accumulatedContent);
+          
+        } catch (streamError) {
+          console.error('Streaming error:', streamError);
+          // Update the message with an error
+          updateMessage(aiMessageId, accumulatedContent + '\n\n*Error: Failed to complete response*');
+        }
       };
-      addMessage(aiMessage);
       
-    } catch (error) {
+      // Start streaming without awaiting to prevent blocking
+      handleStreaming();
+      
+      // Clear selected materials after sending
+      setSelectedMaterials([]);
+      
+    } catch (error: unknown) {
       console.error('Failed to send message', error);
+      
+      // Handle authentication errors
+      if (isAuthError(error)) {
+        setErrorMessage('Session expired. Please log in again.');
+        return;
+      }
+      
+      // Set error message for display
+      setErrorMessage(extractErrorMessage(error));
     } finally {
       setLoading(false);
     }
   };
 
+  // Determine if we're in side panel mode (when a file is selected and being displayed)
+  const isSidePanelMode = !!currentReference?.fileId && showFileDisplay;
+
   return (
-    <div className="bg-background-chat h-full flex-1 flex flex-col transition-all duration-300 pl-10 shadow-sm mt-6">
-      <div className="flex justify-between items-center ml-4 pb-4">
+    <div 
+      className={`bg-background-chat h-full flex flex-col transition-all duration-300 ease-in-out shadow-sm
+        ${isSidePanelMode 
+          ? (isSidebarCollapsed ? 'w-1/4' : 'w-1/3') // Smaller width when PDF is shown
+          : 'w-full pl-10'                           // Full width when no PDF
+        } ${mounted ? 'opacity-100' : 'opacity-0'}`}
+    >
+      <div className="flex justify-between items-center ml-4 pb-4 mt-6">
         <h2 className="text-lg font-medium text-text-primary">
           {isNewSession ? 'New Chat' : 'Chat Session'}
         </h2>
       </div>
 
-      <div className={`flex-1 overflow-y-auto h-full relative p-4 ${isNewSession ? 'flex items-center justify-center' : ''}`}>
-        {messages.length === 0 ? (
+      <div className={`flex-1 overflow-y-auto h-full relative p-4 ${isNewSession && !isSidePanelMode ? 'flex items-center justify-center' : ''}`}>
+        {messages.length === 0 && !isSidePanelMode ? (
           <div className="w-full max-w-2xl transition-all duration-500">
             <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
               <div className="text-center text-text-primary text-4xl font-semibold mb-8 absolute top-40 right-0 left-0">
                 Ask something about your documents
               </div>
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Type your question here..."
-                className="w-full bg-primary border border-secondary rounded-lg px-6 py-4 focus:outline-none focus:border-accent text-text-primary text-lg"
-                disabled={isLoading}
-                autoFocus
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !message.trim()}
-                className={`w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-4 rounded-lg transition-colors text-lg
-                  ${isLoading || !message.trim() ? 'opacity-50 cursor-not-allowed' : ' cursor-pointer'}`}
-              >
-                {isLoading ? <LoadingIcon /> : 'Ask Refery AI'}
-              </button>
+              
+              {/* Error message display */}
+              {errorMessage && (
+                <div className="mb-3 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
+                  <p className="font-semibold">Error:</p>
+                  <p>{errorMessage}</p>
+                </div>
+              )}
+              
+              {/* Selected materials display for new session */}
+              {selectedMaterials.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {selectedMaterials.map(material => (
+                    <div 
+                      key={material.id} 
+                      className="inline-flex items-center bg-accent-100 text-accent px-2 py-1 rounded-md text-sm"
+                    >
+                      <span className="mr-1">
+                        {material.type === 'folder' && '📁'}
+                        {material.type === 'file' && '📄'}
+                      </span>
+                      <span>{material.displayName}</span>
+                      <button 
+                        className="ml-1 text-gray-500 hover:text-gray-700"
+                        onClick={() => handleRemoveMaterial(material.id)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Mention search dropdown for new session */}
+              {showMentionSearch && (
+                <div className="relative mb-3" ref={searchResultsRef}>
+                  {mentionSearchQuery && (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-primary border border-secondary rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                      {isSearching ? (
+                        <div className="p-3 text-center text-text-secondary">Searching...</div>
+                      ) : searchResults.length === 0 ? (
+                        <div className="p-3 text-center text-text-secondary">No results found</div>
+                      ) : (
+                        <ul>
+                          {searchResults.map((item, index) => (
+                            <li 
+                              key={item.id}
+                              className={`p-2 hover:bg-secondary cursor-pointer ${index === 0 ? 'bg-secondary border-l-2 border-accent' : ''}`}
+                              onClick={() => handleSelectMaterial(item)}
+                            >
+                              <div className="flex items-center">
+                                <span className="mr-2">
+                                  {item.type === 'folder' && '📁'}
+                                  {item.type === 'file' && '📄'}
+                                </span>
+                                <div>
+                                  <div className="font-medium text-text-primary">{item.name}</div>
+                                  <div className="text-xs text-text-secondary">{item.path?.join('/')}</div>
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex items-center bg-primary border border-secondary rounded-md overflow-hidden">
+                    <span className="text-lg font-medium px-2 text-text-secondary">@</span>
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      className="flex-grow p-2 outline-none bg-transparent text-text-primary"
+                      placeholder="Search files and folders..."
+                      value={mentionSearchQuery}
+                      onChange={handleSearchInputChange}
+                      onKeyDown={handleSearchKeyDown}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex">
+                <input
+                  type="text"
+                  value={message}
+                  onChange={handleMessageChange}
+                  placeholder="Type your question here..."
+                  className="flex-1 bg-primary border border-secondary rounded-l-lg px-6 py-4 focus:outline-none focus:border-accent text-text-primary text-lg"
+                  disabled={isLoading}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={toggleMentionSearch}
+                  className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-2 transition-colors mention-trigger border border-secondary border-l-0"
+                  title="Add files or folders to context"
+                >
+                  <span className="text-lg font-medium">@</span>
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading || !message.trim()}
+                  className={`bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-4 rounded-r-lg transition-colors text-lg
+                    ${isLoading || !message.trim() ? 'opacity-50 cursor-not-allowed' : ' cursor-pointer'}`}
+                >
+                  {isLoading ? <LoadingIcon /> : 'Ask RefDoc AI'}
+                </button>
+              </div>
             </form>
           </div>
         ) : (
           <>
+            {/* Error message display */}
+            {errorMessage && (
+              <div className="mb-3 p-3 bg-red-100 border border-red-300 text-red-700 rounded-md">
+                <p className="font-semibold">Error:</p>
+                <p>{errorMessage}</p>
+              </div>
+            )}
+            
             {messages.map(message => (
               <MessageBubble
                 key={message.id}
                 id={message.id}
                 role={message.role}
-                content={message.content}
+                firstContent={message.content}
                 timestamp={message.timestamp}
                 references={message.references}
+                selectedMaterials={message.selectedMaterials}
               />
             ))}
             <div ref={messagesEndRef} />
@@ -148,17 +604,97 @@ export default function ChatPane() {
         )}
       </div>
 
-      {!isNewSession && (
+      {((!isNewSession) || isSidePanelMode) && (
         <div className="p-4 animate-slideUp">
+          {/* Selected materials display */}
+          {selectedMaterials.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {selectedMaterials.map(material => (
+                <div 
+                  key={material.id} 
+                  className="inline-flex items-center bg-accent-100 text-accent px-2 py-1 rounded-md text-sm"
+                >
+                  <span className="mr-1">
+                    {material.type === 'folder' && '📁'}
+                    {material.type === 'file' && '📄'}
+                  </span>
+                  <span>{material.displayName}</span>
+                  <button 
+                    className="ml-1 text-gray-500 hover:text-gray-700"
+                    onClick={() => handleRemoveMaterial(material.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Mention search dropdown */}
+          {showMentionSearch && (
+            <div className="relative mb-3" ref={searchResultsRef}>
+              {mentionSearchQuery && (
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-primary border border-secondary rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                  {isSearching ? (
+                    <div className="p-3 text-center text-text-secondary">Searching...</div>
+                  ) : searchResults.length === 0 ? (
+                    <div className="p-3 text-center text-text-secondary">No results found</div>
+                  ) : (
+                    <ul>
+                      {searchResults.map((item, index) => (
+                        <li 
+                          key={item.id}
+                          className={`p-2 hover:bg-secondary cursor-pointer ${index === 0 ? 'bg-secondary border-l-2 border-accent' : ''}`}
+                          onClick={() => handleSelectMaterial(item)}
+                        >
+                          <div className="flex items-center">
+                            <span className="mr-2">
+                              {item.type === 'folder' && '📁'}
+                              {item.type === 'file' && '📄'}
+                            </span>
+                            <div>
+                              <div className="font-medium text-text-primary">{item.name}</div>
+                              <div className="text-xs text-text-secondary">{item.path?.join('/')}</div>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center bg-primary border border-secondary rounded-md overflow-hidden">
+                <span className="text-lg font-medium px-2 text-text-secondary">@</span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="flex-grow p-2 outline-none bg-transparent text-text-primary"
+                  placeholder="Search files and folders..."
+                  value={mentionSearchQuery}
+                  onChange={handleSearchInputChange}
+                  onKeyDown={handleSearchKeyDown}
+                />
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="flex">
             <input
               type="text"
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={handleMessageChange}
               placeholder="Ask a follow-up question..."
               className="flex-1 bg-primary border border-secondary rounded-l-lg px-4 py-2 focus:outline-none focus:border-accent text-text-primary"
               disabled={isLoading}
             />
+            <button
+              type="button"
+              onClick={toggleMentionSearch}
+              className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-2 transition-colors mention-trigger border border-secondary border-l-0 border-r-0"
+              title="Add files or folders to context"
+            >
+              <span className="text-lg font-medium">@</span>
+            </button>
             <button
               type="submit"
               disabled={isLoading || !message.trim()}
@@ -175,21 +711,6 @@ export default function ChatPane() {
 }
 
 // Icon components
-function ChevronIcon({ direction = 'left' }) {
-  return (
-    <svg 
-      xmlns="http://www.w3.org/2000/svg" 
-      className="h-5 w-5" 
-      fill="none" 
-      viewBox="0 0 24 24" 
-      stroke="currentColor"
-      style={{ transform: direction === 'right' ? 'rotate(180deg)' : 'none' }}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-    </svg>
-  );
-}
-
 function SendIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -198,7 +719,7 @@ function SendIcon() {
   );
 }
 
-function LoadingIcon() {
+export function LoadingIcon() {
   return (
     <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
