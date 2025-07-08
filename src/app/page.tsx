@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useAuthStore } from '../store/auth';
 import { useEffect, useState } from 'react';
 import { authService } from '../services/auth';
+import Image from 'next/image';
 
 export default function Home() {
   const { user, setUser } = useAuthStore();
@@ -38,8 +39,10 @@ export default function Home() {
   return (
     <div className="h-screen bg-primary flex items-center justify-center">
       <div className="max-w-4xl mx-auto px-6 text-center">
-        <h1 className="text-5xl font-bold text-text-primary mb-8">
-          Welcome to <span className="text-accent">RefDoc AI</span>
+        <h1 className="flex justify-center items-center text-5xl font-bold text-text-primary mb-8"
+        style={{ height: 100, overflowY: 'hidden' }}>
+          <span>Welcome to</span> 
+          <Image src="/refdoc-ai-logo.png" width={300} height={300} alt='RefDoc AI Logo'></Image>
         </h1>
         
         <p className="text-xl text-secondary mb-12 max-w-2xl mx-auto">

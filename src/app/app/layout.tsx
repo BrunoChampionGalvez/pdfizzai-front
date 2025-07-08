@@ -1,8 +1,9 @@
 'use client';
 
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/auth';
+import { useChatStore } from '../../store/chat';
 import { authService } from '../../services/auth';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
@@ -10,16 +11,32 @@ import ErrorBoundary from '../../components/ErrorBoundary';
 import { PDFViewerProvider } from '../../contexts/PDFViewerContext';
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading, setUser, setLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, user, setUser, setLoading } = useAuthStore();
+  const { clearAll } = useChatStore();
   const router = useRouter();
+  const previousUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
         setLoading(true);
-        const user = await authService.getMe();
-        setUser(user);
+        const currentUser = await authService.getMe();
+        
+        // Check if the user has changed (different user logged in)
+        if (previousUserIdRef.current && previousUserIdRef.current !== currentUser.id) {
+          console.log('User changed, clearing chat state');
+          clearAll(); // Clear all chat state when user changes
+        }
+        
+        previousUserIdRef.current = currentUser.id;
+        setUser(currentUser);
       } catch (error) {
+        // User logged out or session expired
+        if (previousUserIdRef.current) {
+          console.log('User logged out, clearing chat state');
+          clearAll(); // Clear chat state on logout
+        }
+        previousUserIdRef.current = null;
         setUser(null);
         router.push('/auth/login');
       } finally {
@@ -28,7 +45,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     };
 
     checkAuth();
-  }, [setUser, setLoading, router]);
+  }, [setUser, setLoading, router, clearAll]);
 
   if (isLoading) {
     return (

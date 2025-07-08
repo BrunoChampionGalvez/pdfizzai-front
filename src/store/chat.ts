@@ -16,9 +16,9 @@ interface PartialChatReference {
 
 interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'model';
   content: string;
-  timestamp: string;
+  created_at: string;
   references?: ChatReference[];
   selectedMaterials?: MentionedMaterial[];
 }
@@ -47,6 +47,7 @@ interface ChatState {
   setChatPaneCollapsed: (collapsed: boolean) => void;
   setCurrentReference: (reference: PartialChatReference | null) => void;
   clearMessages: () => void;
+  clearAll: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -83,4 +84,12 @@ export const useChatStore = create<ChatState>((set) => ({
     } : null
   }),
   clearMessages: () => set({ messages: [] }),
+  clearAll: () => set({ 
+    currentSessionId: null,
+    messages: [],
+    sessions: [],
+    isLoading: false,
+    isChatPaneCollapsed: false,
+    currentReference: null
+  }),
 }));

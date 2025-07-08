@@ -9,9 +9,9 @@ export interface ChatReference {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'model';
   content: string;
-  timestamp: string;
+  created_at: string;
   referenced_file_id?: string;
   referenced_page?: number;
   referenced_text_snippet?: string;
@@ -31,6 +31,7 @@ export interface SendMessagePayload {
   content: string;
   fileIds?: string[];
   folderIds?: string[];
+  selectedMaterials?: any[];
 }
 
 export const chatService = {
@@ -40,13 +41,16 @@ export const chatService = {
   },
 
   // Generator function for streaming messages
-  async* sendMessageStream(sessionId: string, message: string, fileIds?: string[], folderIds?: string[]): AsyncGenerator<string, ChatResponse, unknown> {
+  async* sendMessageStream(sessionId: string, message: string, fileIds?: string[], folderIds?: string[], selectedMaterials?: any[]): AsyncGenerator<string, ChatResponse, unknown> {
     const payload: SendMessagePayload = { content: message };
     if (fileIds && fileIds.length > 0) {
       payload.fileIds = fileIds;
     }
     if (folderIds && folderIds.length > 0) {
       payload.folderIds = folderIds;
+    }
+    if (selectedMaterials && selectedMaterials.length > 0) {
+      payload.selectedMaterials = selectedMaterials;
     }
     
     try {

@@ -47,12 +47,13 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
     files: state.files.filter(file => file.id !== fileId) 
   })),
   
-  // Fix: Extract folders from the response
+  // Fetch ALL folders and ALL files for the user
   fetchFolders: async () => {
     try {
       set({ isLoading: true });
-      const response = await fileSystemService.getFolders();
-      set({ folders: response.folders }); // Extract folders from the response
+      // Get all folders
+      const foldersResponse = await fileSystemService.getAllFolders();
+      set({ folders: foldersResponse });
     } catch (error) {
       console.error('Failed to fetch folders:', error);
     } finally {
@@ -60,12 +61,13 @@ export const useFileSystemStore = create<FileSystemState>((set, get) => ({
     }
   },
   
-  // Fix: Use getFolders to get files as well since getFiles doesn't exist
+  // Fetch ALL files for the user
   fetchFiles: async () => {
     try {
       set({ isLoading: true });
-      const response = await fileSystemService.getFolders(); // getFolders returns both folders and files
-      set({ files: response.files }); // Extract files from the response
+      // Get all files
+      const filesResponse = await fileSystemService.getAllFiles();
+      set({ files: filesResponse });
     } catch (error) {
       console.error('Failed to fetch files:', error);
     } finally {

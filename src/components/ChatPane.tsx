@@ -16,6 +16,7 @@ export default function ChatPane() {
   const [message, setMessage] = useState('');
   const [isNewSession, setIsNewSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sessionJustCreated, setSessionJustCreated] = useState<string | null>(null);
   const { 
     currentSessionId, 
     messages, 
@@ -52,6 +53,13 @@ export default function ChatPane() {
   useEffect(() => {
     const loadChatHistory = async () => {
       if (currentSessionId) {
+        // Don't load history for sessions that were just created in this component
+        if (sessionJustCreated === currentSessionId) {
+          console.log('Skipping history load for just-created session:', currentSessionId);
+          setIsNewSession(false);
+          return;
+        }
+        
         try {
           setLoading(true);
           const history = await chatService.getChatHistory(currentSessionId);
@@ -72,11 +80,12 @@ export default function ChatPane() {
       } else {
         setMessages([]);
         setIsNewSession(true);
+        setSessionJustCreated(null);
       }
     };
 
     loadChatHistory();
-  }, [currentSessionId, setMessages, setLoading, router]);
+  }, [currentSessionId, setMessages, setLoading, router, sessionJustCreated]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -279,7 +288,7 @@ export default function ChatPane() {
   };
 
   // Handle message change with @ detection
-  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMessageChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const newMessage = e.target.value;
     setMessage(newMessage);
     
@@ -310,6 +319,14 @@ export default function ChatPane() {
     }
   };
 
+  // Handle Enter key press for textarea
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim()) return;
@@ -323,8 +340,21 @@ export default function ChatPane() {
       if (!sessionId) {
         setLoading(true);
         const newSession = await chatService.createSession();
-        setCurrentSessionId(newSession.id);
         sessionId = newSession.id;
+        
+        // Mark this session as just created to prevent history loading
+        setSessionJustCreated(sessionId);
+        
+        // Clear the flag after a short delay to allow future navigation to this session
+        setTimeout(() => {
+          setSessionJustCreated(null);
+        }, 5000); // Clear after 5 seconds
+        
+        // Update the session state and new session flag immediately
+        setCurrentSessionId(sessionId);
+        setIsNewSession(false);
+        
+        console.log('Created new session:', sessionId);
       }
 
       // Ensure we have a valid session ID
@@ -355,9 +385,11 @@ export default function ChatPane() {
         id: generateId(),
         role: 'user' as const,
         content: cleanedMessage,
-        timestamp: currentTime,
+        created_at: currentTime,
         selectedMaterials: selectedMaterials.length > 0 ? [...selectedMaterials] : undefined,
       };
+      
+      console.log('Adding user message:', userMessage);
       addMessage(userMessage);
       setMessage('');
 
@@ -365,16 +397,15 @@ export default function ChatPane() {
       const aiMessageId = generateId();
       const aiMessage = {
         id: aiMessageId,
-        role: 'assistant' as const,
+        role: 'model' as const,
         content: '', // Start with empty content
-        timestamp: new Date().toISOString(),
+        created_at: new Date().toISOString(),
         references: []
       };
+      
+      console.log('Adding AI message placeholder:', aiMessage);
       addMessage(aiMessage);
 
-      // Show assistant is typing
-      setLoading(true);
-      
       // Extract IDs from selected materials
       const fileIds = selectedMaterials
         .filter(material => material.type === 'file')
@@ -396,7 +427,8 @@ export default function ChatPane() {
             sessionId, // Use the local sessionId variable
             cleanedMessage,
             fileIds,
-            folderIds
+            folderIds,
+            selectedMaterials
           )) {
             // Only process if chunk has content
             if (chunk) {
@@ -419,6 +451,9 @@ export default function ChatPane() {
           console.error('Streaming error:', streamError);
           // Update the message with an error
           updateMessage(aiMessageId, accumulatedContent + '\n\n*Error: Failed to complete response*');
+        } finally {
+          // Always set loading to false when streaming is complete
+          setLoading(false);
         }
       };
       
@@ -439,9 +474,8 @@ export default function ChatPane() {
       
       // Set error message for display
       setErrorMessage(extractErrorMessage(error));
-    } finally {
-      setLoading(false);
     }
+    // Remove the finally block since loading is now handled in handleStreaming
   };
 
   // Determine if we're in side panel mode (when a file is selected and being displayed)
@@ -449,25 +483,25 @@ export default function ChatPane() {
 
   return (
     <div 
-      className={`bg-background-chat h-full flex flex-col transition-all duration-300 ease-in-out shadow-sm
+      className={`bg-background-chat relative h-full flex flex-col transition-all duration-300 ease-in-out shadow-sm
         ${isSidePanelMode 
           ? (isSidebarCollapsed ? 'w-1/4' : 'w-1/3') // Smaller width when PDF is shown
-          : 'w-full pl-10'                           // Full width when no PDF
+          : 'w-full max-w-4xl mx-auto px-8'          // Centered with max width when no PDF
         } ${mounted ? 'opacity-100' : 'opacity-0'}`}
     >
-      <div className="flex justify-between items-center ml-4 pb-4 mt-6">
+      <div className={`flex justify-between items-center pb-4 mt-6 ${isSidePanelMode ? 'ml-4' : ''}`}>
         <h2 className="text-lg font-medium text-text-primary">
           {isNewSession ? 'New Chat' : 'Chat Session'}
         </h2>
       </div>
 
-      <div className={`flex-1 overflow-y-auto h-full relative p-4 ${isNewSession && !isSidePanelMode ? 'flex items-center justify-center' : ''}`}>
-        {messages.length === 0 && !isSidePanelMode ? (
-          <div className="w-full max-w-2xl transition-all duration-500">
-            <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
-              <div className="text-center text-text-primary text-4xl font-semibold mb-8 absolute top-40 right-0 left-0">
-                Ask something about your documents
-              </div>
+      <div className={`flex-1 absolute top-0 right-0 left-0 overflow-y-auto p-4 h-full pb-24 pt-18 ${messages.length === 0 && isNewSession && !isSidePanelMode ? 'flex flex-col items-center justify-center' : ''}`}>
+        {messages.length === 0 && isNewSession && !isSidePanelMode ? (
+          <div className="w-full max-w-2xl transition-all duration-500 flex flex-col items-center">
+            <div className="text-center text-text-primary text-4xl font-semibold mb-8">
+              Ask something about your documents
+            </div>
+            <form onSubmit={handleSubmit} className="flex flex-col space-y-4 w-full">
               
               {/* Error message display */}
               {errorMessage && (
@@ -483,7 +517,7 @@ export default function ChatPane() {
                   {selectedMaterials.map(material => (
                     <div 
                       key={material.id} 
-                      className="inline-flex items-center bg-accent-100 text-accent px-2 py-1 rounded-md text-sm"
+                      className="inline-flex items-center bg-primary-100 border-2 border-accent text-accent px-2 py-1 rounded-md text-sm"
                     >
                       <span className="mr-1">
                         {material.type === 'folder' && '📁'}
@@ -549,20 +583,31 @@ export default function ChatPane() {
                 </div>
               )}
 
-              <div className="flex">
-                <input
-                  type="text"
+              <div className="flex items-end w-full min-h-[4rem]">
+                <textarea
                   value={message}
                   onChange={handleMessageChange}
+                  onKeyDown={handleKeyDown}
                   placeholder="Type your question here..."
-                  className="flex-1 bg-primary border border-secondary rounded-l-lg px-6 py-4 focus:outline-none focus:border-accent text-text-primary text-lg"
+                  className="flex-1 bg-primary border border-secondary rounded-l-lg px-6 py-4 focus:outline-none focus:border-accent text-text-primary text-lg resize-none overflow-hidden min-h-[4rem] max-h-[10rem]"
                   disabled={isLoading}
                   autoFocus
+                  rows={1}
+                  style={{
+                    height: 'auto',
+                    minHeight: '4rem',
+                    maxHeight: '10rem'
+                  }}
+                  onInput={(e) => {
+                    const target = e.target as HTMLTextAreaElement;
+                    target.style.height = 'auto';
+                    target.style.height = Math.min(target.scrollHeight, 160) + 'px';
+                  }}
                 />
                 <button
                   type="button"
                   onClick={toggleMentionSearch}
-                  className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-2 transition-colors mention-trigger border border-secondary border-l-0"
+                  className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-4 transition-colors mention-trigger border border-secondary border-l-0 h-16"
                   title="Add files or folders to context"
                 >
                   <span className="text-lg font-medium">@</span>
@@ -570,7 +615,7 @@ export default function ChatPane() {
                 <button
                   type="submit"
                   disabled={isLoading || !message.trim()}
-                  className={`bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-4 rounded-r-lg transition-colors text-lg
+                  className={`bg-accent hover:bg-accent-300 text-primary font-semibold py-4 px-6 rounded-r-lg transition-colors text-lg h-16
                     ${isLoading || !message.trim() ? 'opacity-50 cursor-not-allowed' : ' cursor-pointer'}`}
                 >
                   {isLoading ? <LoadingIcon /> : 'Ask RefDoc AI'}
@@ -594,9 +639,10 @@ export default function ChatPane() {
                 id={message.id}
                 role={message.role}
                 firstContent={message.content}
-                timestamp={message.timestamp}
+                created_at={message.created_at}
                 references={message.references}
                 selectedMaterials={message.selectedMaterials}
+                isSidePanelMode={isSidePanelMode}
               />
             ))}
             <div ref={messagesEndRef} />
@@ -604,15 +650,15 @@ export default function ChatPane() {
         )}
       </div>
 
-      {((!isNewSession) || isSidePanelMode) && (
-        <div className="p-4 animate-slideUp">
+      {(messages.length > 0 || !isNewSession || isSidePanelMode) && (
+        <div className="p-4 animate-slideUp absolute bottom-6 left-0 right-0">
           {/* Selected materials display */}
           {selectedMaterials.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {selectedMaterials.map(material => (
                 <div 
                   key={material.id} 
-                  className="inline-flex items-center bg-accent-100 text-accent px-2 py-1 rounded-md text-sm"
+                  className="inline-flex items-center bg-primary-100 text-accent border-2 border-accent px-2 py-1 rounded-md text-sm"
                 >
                   <span className="mr-1">
                     {material.type === 'folder' && '📁'}
@@ -678,19 +724,30 @@ export default function ChatPane() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="flex">
-            <input
-              type="text"
+          <form onSubmit={handleSubmit} className="flex items-end">
+            <textarea
               value={message}
               onChange={handleMessageChange}
+              onKeyDown={handleKeyDown}
               placeholder="Ask a follow-up question..."
-              className="flex-1 bg-primary border border-secondary rounded-l-lg px-4 py-2 focus:outline-none focus:border-accent text-text-primary"
+              className="flex-1 bg-primary border border-secondary rounded-l-lg px-4 py-2 focus:outline-none focus:border-accent text-text-primary resize-none overflow-hidden min-h-[2.5rem] max-h-[10rem]"
               disabled={isLoading}
+              rows={1}
+              style={{
+                height: 'auto',
+                minHeight: '2.5rem',
+                maxHeight: '10rem'
+              }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = Math.min(target.scrollHeight, 160) + 'px';
+              }}
             />
             <button
               type="button"
               onClick={toggleMentionSearch}
-              className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-2 transition-colors mention-trigger border border-secondary border-l-0 border-r-0"
+              className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-2 transition-colors mention-trigger border border-secondary border-l-0 border-r-0 h-10"
               title="Add files or folders to context"
             >
               <span className="text-lg font-medium">@</span>
@@ -698,8 +755,8 @@ export default function ChatPane() {
             <button
               type="submit"
               disabled={isLoading || !message.trim()}
-              className={`bg-accent hover:bg-accent-300 text-primary font-semibold px-4 py-2 rounded-r-lg transition-colors
-                ${isLoading || !message.trim() ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`bg-accent hover:bg-accent-300 text-primary font-semibold px-4 py-2 rounded-r-lg transition-colors h-10
+                ${isLoading || !message.trim() ? 'cursor-not-allowed' : ''}`}
             >
               {isLoading ? <LoadingIcon /> : <SendIcon />}
             </button>

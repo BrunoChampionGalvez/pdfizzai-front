@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/auth';
 import { useChatStore } from '../store/chat';
 import { authService } from '../services/auth';
 import { chatService } from '../services/chat';
+import Image from 'next/image';
 
 export default function Header() {
   const { user } = useAuthStore();
@@ -14,7 +15,8 @@ export default function Header() {
     currentSessionId, 
     setCurrentSessionId, 
     addSession, 
-    clearMessages 
+    clearMessages,
+    clearAll
   } = useChatStore();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
@@ -25,6 +27,7 @@ export default function Header() {
       setIsLoggingOut(true);
       await authService.logout();
       useAuthStore.getState().logout();
+      clearAll(); // Clear all chat state on logout
       router.push('/');
     } catch (error) {
       console.error('Failed to logout', error);
@@ -54,32 +57,34 @@ export default function Header() {
 
   return (
     <header className="bg-background-header p-4 flex justify-between items-center shadow-sm z-10">
-      <div className="flex items-center">
-        <div className="text-xl font-bold text-accent mr-8">RefDoc AI</div>
+      <div className="flex items-center" style={{ height: 50, overflowY: 'hidden' }}>
+        <Image src="/refdoc-ai-logo.png" alt="RefDoc AI Logo" width={150} height={150} />
         
         <div className="flex items-center space-x-4">
           <button
-            onClick={createNewSession}
-            disabled={isCreatingSession}
-            className="bg-accent hover:bg-accent-300 text-primary px-3 py-1 rounded-lg transition-colors duration-200 flex items-center cursor-pointer font-medium"
+        onClick={createNewSession}
+        disabled={isCreatingSession}
+        className="bg-accent hover:bg-accent-300 text-primary px-3 py-1 rounded-lg transition-colors duration-200 flex items-center cursor-pointer font-medium ml-10"
           >
-            <PlusIcon className="w-4 h-4 mr-1" />
-            {isCreatingSession ? 'Creating...' : 'New Chat'}
+        <PlusIcon className="w-4 h-4 mr-1" />
+        {isCreatingSession ? 'Creating...' : 'New Chat'}
           </button>
           
           {sessions.length > 0 && (
-            <select
-              value={currentSessionId || ''}
-              onChange={(e) => handleSessionChange(e.target.value)}
-              className="bg-primary border border-secondary text-text-primary px-3 py-1 rounded-lg focus:outline-none focus:border-accent transition-colors"
-            >
-              <option value="" disabled>Select a chat session</option>
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {new Date(session.created_at).toLocaleString()}
-                </option>
-              ))}
-            </select>
+        <select
+          value={currentSessionId || ''}
+          onChange={(e) => handleSessionChange(e.target.value)}
+          className="bg-primary border border-secondary text-text-primary px-3 py-1 rounded-lg focus:outline-none focus:border-accent transition-colors"
+        >
+          <option value="" disabled>
+            {sessions.length === 0 ? 'No chat sessions' : 'Select a chat session'}
+          </option>
+          {sessions.map((session) => (
+            <option key={session.id} value={session.id}>
+          {new Date(session.created_at).toLocaleString()}
+            </option>
+          ))}
+        </select>
           )}
         </div>
       </div>

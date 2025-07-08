@@ -22,20 +22,22 @@ interface ReferenceTag {
 
 interface MessageBubbleProps {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'model';
   firstContent: string;
-  timestamp: string;
+  created_at: string;
   references?: ChatReference[];
   selectedMaterials?: MentionedMaterial[];
+  isSidePanelMode?: boolean;
 }
 
 export default function MessageBubble({ 
   role,
   id,
   firstContent, 
-  timestamp, 
+  created_at, 
   references, 
-  selectedMaterials 
+  selectedMaterials,
+  isSidePanelMode = false
 }: MessageBubbleProps) {
   const { setCurrentReference } = useChatStore();
   const { handleShowFile } = usePDFViewer();
@@ -100,7 +102,7 @@ export default function MessageBubble({
   
   // Memoize reference IDs to avoid re-running effect on every content change
   const referenceIds = useMemo(() => {
-    if (!content || role !== 'assistant') return [];
+    if (!content || role !== 'model') return [];
     
     const segments = parseContentIntoSegments(content);
     return segments
@@ -212,9 +214,9 @@ export default function MessageBubble({
             {tag.text && <><span className="font-semibold">Reference:</span> {tag.text}</> }
           </div>
           
-          <div className="mt-2 space-y-2">
+          <div className={`mt-2 ${isSidePanelMode ? 'space-y-2' : 'flex space-x-2'}`}>
             <button 
-              className="w-full px-3 py-2 bg-accent-200 text-primary rounded hover:bg-accent-300 transition-colors text-sm font-medium cursor-pointer"
+              className={`${isSidePanelMode ? 'w-full' : 'flex-1'} px-3 py-2 bg-accent-200 text-primary rounded hover:bg-accent-300 transition-colors text-sm font-medium cursor-pointer`}
               onClick={() => handleShowFileWrapper(tag.id, tag.text || '')}
               disabled={isLoading}
             >
@@ -223,11 +225,11 @@ export default function MessageBubble({
                   <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2"></div>
                   <span>Loading...</span>
                 </div>
-              ) : 'Show File'}
+              ) : (isSidePanelMode ? 'Show File' : 'Show')}
             </button>
             
             <button 
-              className="w-full px-3 py-2 bg-secondary text-text-primary border border-secondary rounded hover:bg-secondary-300 transition-colors text-sm font-medium cursor-pointer"
+              className={`${isSidePanelMode ? 'w-full' : 'flex-1'} px-3 py-2 bg-secondary text-text-primary border border-secondary rounded hover:bg-secondary-300 transition-colors text-sm font-medium cursor-pointer`}
               onClick={() => handleLoadReferenceAgain(tag.id, tag.text || '')}
               disabled={isLoading}
             >
@@ -236,7 +238,7 @@ export default function MessageBubble({
                   <div className="w-4 h-4 border-2 border-text-primary border-t-transparent rounded-full animate-spin mr-2"></div>
                   <span>Loading...</span>
                 </div>
-              ) : 'Load Reference Again'}
+              ) : (isSidePanelMode ? 'Load Reference Again' : 'Reload')}
             </button>
           </div>
         </div>
@@ -247,7 +249,7 @@ export default function MessageBubble({
   // Render content with reference tags
   const renderContentWithReferences = () => {
     if (!content) {
-      if (role === 'assistant') {
+      if (role === 'model') {
         return (
           <div className="mt-2 mb-3 p-3 border rounded-md bg-secondary" key="loading-response">
             <div className="flex items-center space-x-2">
@@ -324,8 +326,8 @@ export default function MessageBubble({
   const isUser = role === 'user';
   
   return (
-    <div className="w-full mb-4">
-      <div className={`w-full rounded-lg p-4 ${
+    <div className={`w-full mb-4 flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`${isSidePanelMode ? 'max-w-[90%]' : 'max-w-[70vw]'} min-w-[200px] rounded-lg p-4 ${
         isUser 
           ? 'bg-accent text-primary' 
           : 'bg-background-secondary text-text-primary'
@@ -358,7 +360,7 @@ export default function MessageBubble({
                   {selectedMaterials.map(material => (
                     <div 
                       key={material.id} 
-                      className="inline-flex items-center bg-accent-100 text-accent px-2 py-1 rounded-md text-xs"
+                      className="inline-flex items-center bg-primary-100 border-2 border-accent text-accent px-2 py-1 rounded-md text-xs"
                     >
                       <span className="mr-1">
                         {material.type === 'folder' && '📁'}
@@ -393,7 +395,7 @@ export default function MessageBubble({
         )}
         
         <div className="text-right mt-1">
-          <span className="text-xs opacity-70">{formatTime(timestamp)}</span>
+          <span className="text-xs opacity-70">{formatTime(created_at)}</span>
         </div>
       </div>
     </div>

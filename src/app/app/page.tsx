@@ -14,12 +14,13 @@ import { setRedirectPath } from '../../lib/auth-utils';
 import { isAuthError } from '../../types/errors';
 
 export default function AppPage() {
-  const { currentFolderId, folders, files, setFolders, setFiles, setLoading: setFSLoading } = useFileSystemStore();
+  const { currentFolderId, setFolders, setFiles, setLoading: setFSLoading } = useFileSystemStore();
   const { 
     currentSessionId, 
     currentReference, 
-    isChatPaneCollapsed,
     setSessions, 
+    setCurrentSessionId,
+    addSession,
     setLoading: setChatLoading 
   } = useChatStore();
   const { showFileDisplay } = usePDFViewer();
@@ -86,13 +87,17 @@ export default function AppPage() {
     loadFolderContents();
   }, [currentFolderId, setFolders, setFiles, setFSLoading]);
 
-  // Load chat sessions
+  // Load chat sessions without creating initial session
   useEffect(() => {
     const loadChatSessions = async () => {
       try {
         setChatLoading(true);
         const sessions = await chatService.getUserSessions();
         setSessions(sessions);
+        
+        // Don't automatically create a session - let user send first message or click "New Chat"
+        console.log(`Loaded ${sessions.length} existing chat sessions`);
+        
       } catch (error) {
         console.error('Failed to load chat sessions', error);
         if (isAuthError(error)) {
@@ -107,7 +112,7 @@ export default function AppPage() {
     };
 
     loadChatSessions();
-  }, [setSessions, setChatLoading]);
+  }, [setSessions, setChatLoading, setError]);
 
   // When no files are selected or referenced, show welcome screen
   if (isInitialLoading) {
@@ -137,7 +142,7 @@ export default function AppPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className={`flex h-full ${currentReference && showFileDisplay ? 'flex-col md:flex-row' : ''}`}>
+      <div className={`flex h-full bg-background-chat ${currentReference && showFileDisplay ? 'flex-col md:flex-row' : ''}`}>
         <ChatPane />
         {currentReference && showFileDisplay && <PDFViewer />}
       </div>
