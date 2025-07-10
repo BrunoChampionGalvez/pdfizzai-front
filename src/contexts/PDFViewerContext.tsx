@@ -175,17 +175,22 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       // Fetch in the background, don't wait for this
       (async () => {
         try {
-          const response: AppFile = await api.get(`/api/files`, {
-            params: { fileId: prevState.currentFileId }
-          });
+          // Use the same endpoint as handleShowFile to get the specific file
+          const response = await api.get(`/api/files/${prevState.currentFileId}`);
+          
+          console.log('fetchPapers response:', response);
+          console.log('fetchPapers response.data:', response.data);
+          console.log('fetchPapers storage_path:', response.data?.storage_path);
           
           // If we have a selected paper, update it with the fresh data
-          if (response) {
+          if (response.data) {
             setState(currentState => ({
               ...currentState,
-              currentFileId: response.id,
-              currentFilePath: `https://storage.googleapis.com/refdoc-ai-bucket/${response.storage_path}` || null,
-              currentFile: response,
+              currentFileId: response.data.id,
+              currentFilePath: response.data.storage_path 
+                ? `https://storage.googleapis.com/refdoc-ai-bucket/${response.data.storage_path}` 
+                : null,
+              currentFile: response.data,
             }));
           }
         } catch (error) {
@@ -202,6 +207,8 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
   }, []);
 
   const handleTextExtractionComplete = useCallback((success: boolean) => {
+    console.log('PDFViewerContext: Text extraction completed with success:', success);
+    
     if (success) {
       // Update extraction state
       setState(prevState => ({
@@ -213,14 +220,17 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
         }
       }));
       
+      console.log('PDFViewerContext: Refreshing file data after extraction...');
       // Refresh the paper list to get the updated textExtracted status
       fetchPapers();
       
       // Call the file list refresh handler if available
       if (fileListRefreshHandler.current) {
+        console.log('PDFViewerContext: Calling file list refresh handler...');
         fileListRefreshHandler.current();
       }
     } else {
+      console.log('PDFViewerContext: Text extraction failed');
       setState(prevState => ({
         ...prevState,
         error: 'Text extraction failed',
@@ -234,7 +244,11 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
   }, [fetchPapers]);
 
   const triggerExtraction = useCallback((fileId: string, fileUrl: string) => {
-    console.log('Triggering extraction for file:', fileId, fileUrl);
+    console.log('PDFViewerContext: Triggering extraction for file:', fileId);
+    console.log('PDFViewerContext: FileUrl received:', fileUrl);
+    console.log('PDFViewerContext: FileUrl type:', typeof fileUrl);
+    console.log('PDFViewerContext: FileUrl length:', fileUrl?.length);
+    
     setState(prevState => ({
       ...prevState,
       extractionState: {
@@ -283,25 +297,32 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       {children}
       
       {/* Render the hidden extractor if needed */}
-      {state.extractionState.isExtracting && state.extractionState.fileId && state.extractionState.fileUrl && (
-        <div className="hidden-extractor-wrapper" style={{ 
-          position: 'fixed', 
-          left: '-9999px',
-          width: '800px',
-          height: '600px',
-          zIndex: -1
-        }}>
-          <PdfExtractor
-            key={`extractor-${state.extractionState.fileId}`}
-            fileId={state.extractionState.fileId}
-            fileUrl={state.extractionState.fileUrl}
-            onExtractionComplete={handleTextExtractionComplete}
-            onExtractionProgress={(progress) => {
-              console.log('Text extraction progress:', progress);
-            }}
-          />
-        </div>
-      )}
+      {state.extractionState.isExtracting && state.extractionState.fileId && state.extractionState.fileUrl && (() => {
+        console.log('PDFViewerContext: Rendering PdfExtractor with:', {
+          fileId: state.extractionState.fileId,
+          fileUrl: state.extractionState.fileUrl,
+          isExtracting: state.extractionState.isExtracting
+        });
+        return (
+          <div className="hidden-extractor-wrapper" style={{ 
+            position: 'fixed', 
+            left: '-9999px',
+            width: '800px',
+            height: '600px',
+            zIndex: -1
+          }}>
+            <PdfExtractor
+              key={`extractor-${state.extractionState.fileId}`}
+              fileId={state.extractionState.fileId}
+              fileUrl={state.extractionState.fileUrl}
+              onExtractionComplete={handleTextExtractionComplete}
+              onExtractionProgress={(progress) => {
+                console.log('Text extraction progress:', progress);
+              }}
+            />
+          </div>
+        );
+      })()}
     </PDFViewerContext.Provider>
   );
 };

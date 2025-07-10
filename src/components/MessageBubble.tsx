@@ -186,7 +186,7 @@ export default function MessageBubble({
     setLoadingRefAction(referenceId);
     
     try {
-      const result = await chatService.loadReferenceAgain(id, textSnippet, content);
+      const result = await chatService.loadReferenceAgain(referenceId, id, textSnippet, content);
       setContent(result)
     } catch (error) {
       console.error('Error loading reference again:', error);
@@ -251,11 +251,9 @@ export default function MessageBubble({
     if (!content) {
       if (role === 'model') {
         return (
-          <div className="mt-2 mb-3 p-3 border rounded-md bg-secondary" key="loading-response">
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 border-2 border-text-secondary border-t-transparent rounded-full animate-spin"></div>
-              <div className="text-sm font-medium text-text-secondary">Loading response...</div>
-            </div>
+          <div className="flex items-center space-x-3 py-3" key="loading-response">
+            <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin"></div>
+            <div className="text-sm font-medium text-accent">Loading...</div>
           </div>
         );
       }

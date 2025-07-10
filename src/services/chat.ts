@@ -222,12 +222,13 @@ export const chatService = {
     }
   },
 
-  async loadReferenceAgain(messageId: string, textToSearch: string, chatMessage: string): Promise<string> {
+  async loadReferenceAgain(referenceId: string, messageId: string, textToSearch: string, chatMessage: string): Promise<string> {
     console.log('Inside searchReferenceAgain Service');
     
     const response = await api.post<string>(`/api/chat/load-reference-again/${messageId}`, {
       textToSearch,
-      chatMessage
+      chatMessage,
+      referenceId,
     });
     
     return response.data;

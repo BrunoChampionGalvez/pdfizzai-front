@@ -25,6 +25,13 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
   onExtractionComplete,
   onExtractionProgress,
 }) => {
+  console.log(`[PDF Extractor] Component created with props:`, {
+    fileId,
+    fileUrl,
+    fileUrlType: typeof fileUrl,
+    fileUrlLength: fileUrl?.length
+  });
+  
   const [isExtracting, setIsExtracting] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -437,11 +444,6 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
           minHeight: '400px',
         }}
       />
-      {isExtracting && (
-        <div className="text-xs text-gray-500 mt-2">
-          Extracting PDF text...
-        </div>
-      )}
     </div>
   );
 };

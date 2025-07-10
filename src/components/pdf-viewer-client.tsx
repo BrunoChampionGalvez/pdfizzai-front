@@ -294,7 +294,7 @@ export const PdfViewerClient = ({
             const doc = await documentViewer.getDocument();
             const batchSize = 10; // Process 10 pages at a time
             const batches = Math.ceil(totalPages / batchSize);
-            const extractedText: Record<string, string> = {};
+            let extractedText: string = '';
             
             for (let batch = 0; batch < batches; batch++) {
                 // Calculate page range for this batch (1-indexed for PDF.js Express)
@@ -306,7 +306,7 @@ export const PdfViewerClient = ({
                 for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
                     try {
                         const text = await doc.loadPageText(pageNum);
-                        extractedText[pageNum.toString()] = `[START_PAGE]${text}[END_PAGE]`;
+                        extractedText += `[START_PAGE]${text}[END_PAGE]`;
                     } catch (error) {
                         console.error(`Error extracting text from page ${pageNum}, retrying...`, error);
                         
@@ -315,10 +315,10 @@ export const PdfViewerClient = ({
                         
                         try {
                             const text = await doc.loadPageText(pageNum);
-                            extractedText[pageNum.toString()] = `[START_PAGE]${text}[END_PAGE]`;
+                            extractedText += `[START_PAGE]${text}[END_PAGE]`;
                         } catch (retryError) {
                             console.error(`Failed to extract text from page ${pageNum} after retry`, retryError);
-                            extractedText[pageNum.toString()] = `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
+                            extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
                         }
                     }
                     
@@ -384,11 +384,6 @@ export const PdfViewerClient = ({
                 </div>
             ) : (
                 <>
-                    {isExtracting && (
-                        <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white p-2 z-10 text-center">
-                            Extracting PDF text: {extractionProgress}%
-                        </div>
-                    )}
                     <div 
                         className="webviewer" 
                         ref={viewer}

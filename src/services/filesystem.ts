@@ -14,6 +14,9 @@ export interface File {
   size_bytes: number;
   folder_id: string | null;
   upload_date: string;
+  storage_path: string;
+  textExtracted?: boolean;
+  processed?: boolean;
 }
 
 export const fileSystemService = {
@@ -49,10 +52,6 @@ export const fileSystemService = {
 
   async deleteFile(fileId: string): Promise<void> {
     await api.delete(`/api/files/${fileId}`);
-  },
-
-  getFileDownloadUrl(fileId: string): string {
-    return `${api.defaults.baseURL}/api/files/${fileId}/download`;
   },
 
   // New methods for @ functionality

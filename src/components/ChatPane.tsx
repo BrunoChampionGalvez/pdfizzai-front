@@ -27,7 +27,8 @@ export default function ChatPane() {
     setLoading,
     currentReference,
     updateMessage,
-    updateMessageContent
+    updateMessageContent,
+    addSession
   } = useChatStore();
   const { isSidebarCollapsed } = useUIStore();
   const { showFileDisplay } = usePDFViewer();
@@ -85,7 +86,7 @@ export default function ChatPane() {
     };
 
     loadChatHistory();
-  }, [currentSessionId, setMessages, setLoading, router, sessionJustCreated]);
+  }, [currentSessionId, setMessages, setLoading, router]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -331,14 +332,14 @@ export default function ChatPane() {
     e.preventDefault();
     if (!message.trim()) return;
     
-    // Clear any previous error messages
+    // Clear any previous error messages and set loading state
     setErrorMessage(null);
+    setLoading(true);
 
     try {
       // Create a new chat session if needed
       let sessionId = currentSessionId;
       if (!sessionId) {
-        setLoading(true);
         const newSession = await chatService.createSession();
         sessionId = newSession.id;
         
@@ -350,7 +351,8 @@ export default function ChatPane() {
           setSessionJustCreated(null);
         }, 5000); // Clear after 5 seconds
         
-        // Update the session state and new session flag immediately
+        // Add the session to the sessions list and update the current session
+        addSession(newSession);
         setCurrentSessionId(sessionId);
         setIsNewSession(false);
         
@@ -469,11 +471,13 @@ export default function ChatPane() {
       // Handle authentication errors
       if (isAuthError(error)) {
         setErrorMessage('Session expired. Please log in again.');
+        setLoading(false);
         return;
       }
       
-      // Set error message for display
+      // Set error message for display and clear loading
       setErrorMessage(extractErrorMessage(error));
+      setLoading(false);
     }
     // Remove the finally block since loading is now handled in handleStreaming
   };

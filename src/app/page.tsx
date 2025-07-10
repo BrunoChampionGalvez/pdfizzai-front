@@ -100,7 +100,7 @@ export default function Home() {
             <div className="text-accent text-4xl mb-4">🔗</div>
             <h3 className="text-xl font-semibold text-text-primary mb-2">Precise References</h3>
             <p className="text-secondary">
-              Get exact page numbers and text snippets with clickable references to source material.
+              Get exact text snippets with clickable references to source material.
             </p>
           </div>
         </div>

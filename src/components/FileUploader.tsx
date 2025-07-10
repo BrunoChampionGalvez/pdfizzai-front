@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
+import { useChatStore } from '../store/chat';
 import { fileSystemService } from '../services/filesystem';
 import api from '../lib/api';
 
@@ -17,7 +18,8 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentFolderId, addFile } = useFileSystemStore();
-  const { triggerExtraction } = usePDFViewer();
+  const { triggerExtraction, handleShowFile } = usePDFViewer();
+  const { setCurrentReference } = useChatStore();
   
   const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
 
@@ -53,12 +55,26 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
         // Check if this is a PDF file that needs extraction
         if (file.type === 'application/pdf' && uploadedFile) {
           console.log('Setting up PDF extraction for:', uploadedFile.id);
+          console.log('Initial uploadedFile storage_path:', uploadedFile.storage_path);
+          
+          // Set the current reference and show the file in the PDF viewer
+          setCurrentReference({
+            fileId: uploadedFile.id,
+            page: 1,
+            text: ''
+          });
+          
+          // Show the file in the PDF viewer
+          await handleShowFile(uploadedFile.id, '');
           
           // Try to construct the file URL - we'll need to fetch the file details to get the storage_path
           try {
             // Fetch the complete file information
             const response = await api.get(`/api/files/${uploadedFile.id}`);
             const fileDetails = response.data;
+            console.log('Fetched fileDetails:', fileDetails);
+            console.log('Fetched fileDetails.storage_path:', fileDetails.storage_path);
+            
             if (fileDetails && fileDetails.storage_path && !fileDetails.textExtracted) {
               const fileUrl = `https://storage.googleapis.com/refdoc-ai-bucket/${fileDetails.storage_path}`;
               
@@ -66,6 +82,12 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
               triggerExtraction(uploadedFile.id, fileUrl);
               
               console.log('PDF extraction will begin for:', fileUrl);
+            } else {
+              console.error('File details missing storage_path or already extracted:', {
+                hasFileDetails: !!fileDetails,
+                hasStoragePath: !!fileDetails?.storage_path,
+                textExtracted: fileDetails?.textExtracted
+              });
             }
           } catch (error) {
             console.error('Failed to fetch file details for extraction:', error);
