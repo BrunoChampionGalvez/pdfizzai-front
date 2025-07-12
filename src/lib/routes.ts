@@ -5,6 +5,7 @@
 // Routes that don't require authentication
 export const publicRoutes = [
   '/',
+  '/pricing',
   '/auth/login',
   '/auth/signup',
   '/auth/forgot-password',

@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { setRedirectPath } from '../lib/auth-utils';
 import { isPublicRoute } from '../lib/routes';
 import { authService } from '../services/auth';
+import Navbar from './Navbar';
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -65,5 +66,17 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return isAuthorized ? <>{children}</> : null;
+  if (!isAuthorized) {
+    return null;
+  }
+
+  // Check if current route is public to decide whether to show navbar
+  const showNavbar = isPublicRoute(pathname || '');
+
+  return (
+    <>
+      {showNavbar && <Navbar />}
+      {children}
+    </>
+  );
 }

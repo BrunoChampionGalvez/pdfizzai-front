@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@paddle/paddle-js": "^1.4.2",
     "@pdftron/pdfjs-express-viewer": "^8.7.5",
     "@types/js-cookie": "^3.0.6",
     "axios": "^1.10.0",

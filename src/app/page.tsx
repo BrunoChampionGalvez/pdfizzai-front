@@ -5,10 +5,24 @@ import { useAuthStore } from '../store/auth';
 import { useEffect, useState } from 'react';
 import { authService } from '../services/auth';
 import Image from 'next/image';
+import { initializePaddle } from '@paddle/paddle-js';
 
 export default function Home() {
   const { user, setUser } = useAuthStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    const initializePaddleFunction = async () => {
+    // Initialize Paddle on client side
+      const paddle = await initializePaddle({
+        token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
+        pwCustomer: {
+          id: 'ctm_01gt25aq4b2zcfw12szwtjrbdt' // replace with a customer Paddle ID
+        }
+      });
+    }
+    initializePaddleFunction();
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -37,7 +51,7 @@ export default function Home() {
   }
 
   return (
-    <div className="h-screen bg-primary flex items-center justify-center">
+    <div className="min-h-screen bg-primary flex items-center justify-center">
       <div className="max-w-4xl mx-auto px-6 text-center">
         <h1 className="flex justify-center items-center text-5xl font-bold text-text-primary mb-8"
         style={{ height: 100, overflowY: 'hidden' }}>
@@ -67,13 +81,6 @@ export default function Home() {
                 className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
               >
                 Get Started
-              </Link>
-              
-              <Link
-                href="/auth/login"
-                className="inline-block bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
-              >
-                Sign In
               </Link>
             </>
           )}

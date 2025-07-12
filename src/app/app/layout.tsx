@@ -60,7 +60,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-primary">
+    <div className="flex flex-col h-full bg-primary relative">
       <Header />
       <PDFViewerProvider>
         <div className="flex flex-1 overflow-hidden">

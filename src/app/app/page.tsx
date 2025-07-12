@@ -12,6 +12,7 @@ import ChatPane from '../../components/ChatPane';
 import PDFViewer from '../../components/PDFContainer';
 import { setRedirectPath } from '../../lib/auth-utils';
 import { isAuthError } from '../../types/errors';
+import { initializePaddle, Environments } from '@paddle/paddle-js';
 
 export default function AppPage() {
   const { currentFolderId, setFolders, setFiles, setLoading: setFSLoading } = useFileSystemStore();
@@ -27,6 +28,20 @@ export default function AppPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    const initializePaddleFunction = async () => {
+    // Initialize Paddle on client side
+      const paddle = await initializePaddle({
+        token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
+        pwCustomer: {
+          id: 'ctm_01gt25aq4b2zcfw12szwtjrbdt' // replace with a customer Paddle ID
+        },
+        environment: 'sandbox'
+      });
+    }
+    initializePaddleFunction();
+  }, []);
 
   // Enhanced authentication check on mount with debug
   useEffect(() => {
