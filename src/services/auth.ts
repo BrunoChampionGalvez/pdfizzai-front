@@ -3,6 +3,8 @@ import api from '../lib/api';
 export interface SignupData {
   email: string;
   password: string;
+  name: string;
+  country: string;
 }
 
 export interface LoginData {
@@ -14,6 +16,7 @@ export interface User {
   id: string;
   email: string;
   name?: string;
+  country?: string;
   // Add any other user properties
 }
 

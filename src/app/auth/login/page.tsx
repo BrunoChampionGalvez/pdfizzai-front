@@ -25,15 +25,6 @@ export default function LoginPage() {
       // Avoid running this effect if we're already in a redirection process
       if (isRedirecting.current) return;
       
-      console.log('Login page: Checking auth state...');
-      
-      // Check for redirect target first, before any redirects happen
-      const savedRedirectPath = getRedirectPath();
-      if (savedRedirectPath) {
-        console.log('Found saved redirect path:', savedRedirectPath);
-        setRedirectTarget(savedRedirectPath);
-      }
-      
       // Check if user is already authenticated
       try {
         const isAuthenticated = await authService.isAuthenticated();
@@ -42,14 +33,7 @@ export default function LoginPage() {
           console.log('User already logged in, redirecting');
           isRedirecting.current = true;
           
-          // Navigate to either the saved redirect path or default to /app
-          const target = savedRedirectPath || '/app';
-          
-          // Clean up the stored redirect path
-          clearRedirectPath();
-          
-          // Use window.location for a full page navigation to break any potential loops
-          window.location.href = target;
+          router.push('/app');
           return;
         }
       } catch (error) {

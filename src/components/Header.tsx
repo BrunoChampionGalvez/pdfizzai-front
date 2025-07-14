@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../store/auth';
 import { useChatStore } from '../store/chat';
@@ -20,7 +20,26 @@ export default function Header() {
   } = useChatStore();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
 
   const handleLogout = async () => {
     try {
@@ -91,18 +110,46 @@ export default function Header() {
       
       <div className="flex items-center space-x-4">
         {user && (
-          <div className="text-text-primary">
-            {user.email}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center space-x-2 text-text-primary hover:text-accent transition-colors duration-200 cursor-pointer"
+            >
+              <UserIcon className="w-5 h-5" />
+              <span>{user.name || user.email}</span>
+              <ChevronDownIcon className={`w-4 h-4 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {isDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-background-secondary border border-secondary rounded-lg shadow-lg z-50">
+                <div className="py-1">
+                  <button
+                    onClick={() => {
+                      router.push('/subscription');
+                      setIsDropdownOpen(false);
+                    }}
+                    className="flex items-center w-full px-4 py-2 text-sm text-text-primary hover:bg-primary hover:text-accent cursor-pointer transition-colors duration-200"
+                  >
+                    <CreditCardIcon className="w-4 h-4 mr-3" />
+                    Subscription
+                  </button>
+                  <hr className="border-secondary" />
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setIsDropdownOpen(false);
+                    }}
+                    disabled={isLoggingOut}
+                    className="flex items-center w-full px-4 py-2 text-sm text-text-primary hover:bg-primary hover:text-accent cursor-pointer transition-colors duration-200"
+                  >
+                    <LogoutIcon className="w-4 h-4 mr-3" />
+                    {isLoggingOut ? 'Logging out...' : 'Log out'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
-        
-        <button
-          onClick={handleLogout}
-          disabled={isLoggingOut}
-          className="bg-secondary hover:bg-secondary-200 text-text-primary px-3 py-1 rounded-lg transition-colors duration-200 cursor-pointer"
-        >
-          {isLoggingOut ? 'Logging out...' : 'Log out'}
-        </button>
       </div>
     </header>
   );
@@ -122,6 +169,82 @@ function PlusIcon({ className = 'w-6 h-6' }) {
         strokeLinejoin="round" 
         strokeWidth={2} 
         d="M12 4v16m8-8H4" 
+      />
+    </svg>
+  );
+}
+
+function UserIcon({ className = 'w-6 h-6' }) {
+  return (
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      className={className} 
+      fill="none" 
+      viewBox="0 0 24 24" 
+      stroke="currentColor"
+    >
+      <path 
+        strokeLinecap="round" 
+        strokeLinejoin="round" 
+        strokeWidth={2} 
+        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" 
+      />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ className = 'w-6 h-6' }) {
+  return (
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      className={className} 
+      fill="none" 
+      viewBox="0 0 24 24" 
+      stroke="currentColor"
+    >
+      <path 
+        strokeLinecap="round" 
+        strokeLinejoin="round" 
+        strokeWidth={2} 
+        d="M19 9l-7 7-7-7" 
+      />
+    </svg>
+  );
+}
+
+function CreditCardIcon({ className = 'w-6 h-6' }) {
+  return (
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      className={className} 
+      fill="none" 
+      viewBox="0 0 24 24" 
+      stroke="currentColor"
+    >
+      <path 
+        strokeLinecap="round" 
+        strokeLinejoin="round" 
+        strokeWidth={2} 
+        d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" 
+      />
+    </svg>
+  );
+}
+
+function LogoutIcon({ className = 'w-6 h-6' }) {
+  return (
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      className={className} 
+      fill="none" 
+      viewBox="0 0 24 24" 
+      stroke="currentColor"
+    >
+      <path 
+        strokeLinecap="round" 
+        strokeLinejoin="round" 
+        strokeWidth={2} 
+        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" 
       />
     </svg>
   );

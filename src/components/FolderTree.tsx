@@ -748,7 +748,7 @@ export default function FolderTree() {
           onDrop={(e) => handleDrop(null, e)}
         >
           <HomeIcon />
-          <span className="ml-2 text-sm font-medium text-text-primary">All Documents</span>
+          <span className="ml-2 text-sm font-medium text-text-primary">Home Folder</span>
           <div className="flex space-x-1 ml-auto">
             {/* New folder button for root level */}
             <button

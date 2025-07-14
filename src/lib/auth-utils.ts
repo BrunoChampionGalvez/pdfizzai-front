@@ -8,7 +8,6 @@ export const setRedirectPath = (path: string): void => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem('redirectAfterLogin', path);
-    console.log('Redirect path saved:', path);
   } catch (err) {
     console.error('Error setting redirect path:', err);
   }
@@ -30,7 +29,6 @@ export const clearRedirectPath = (): void => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem('redirectAfterLogin');
-    console.log('Redirect path cleared');
   } catch (err) {
     console.error('Error clearing redirect path:', err);
   }
