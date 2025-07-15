@@ -9,6 +9,12 @@ import { useAuthStore } from '../../store/auth';
 import { authService } from '../../services/auth';
 import { setRedirectPath } from '../../lib/auth-utils';
 
+enum PlanName {
+  STARTER = 'starter',
+  PRO = 'pro',
+  ENTERPRISE = 'enterprise',
+}
+
 export default function PricingPage() {
   const [isAnnual, setIsAnnual] = useState(false);
   const { user, isAuthenticated, setUser } = useAuthStore();
@@ -79,6 +85,8 @@ export default function PricingPage() {
         items: items,
         customData: {
           userId: user.id,
+          isTrial: planInfo.isTrial,
+          planName: planInfo.name === 'Starter' ? PlanName.STARTER : planInfo.name === 'Pro' ? PlanName.PRO : PlanName.ENTERPRISE,
         },
       });
     }, 200);
@@ -230,7 +238,10 @@ export default function PricingPage() {
                     </div>
                   )}
                   <div className="text-sm text-accent mt-2 font-medium">
-                    Try free for 3 days
+                    Try free for 7 days
+                  </div>
+                  <div className="text-xs text-accent mt-1 font-medium">
+                    with 10 PDFs, 20 AI messages
                   </div>
                 </div>
                 <ul className="text-left space-y-3 mb-8">
@@ -316,7 +327,10 @@ export default function PricingPage() {
                     </div>
                   )}
                   <div className="text-sm text-accent mt-2 font-medium">
-                    Try free for 3 days
+                    Try free for 7 days
+                  </div>
+                  <div className="text-xs text-accent mt-1 font-semibold">
+                    with 20 PDFs, 40 AI messages
                   </div>
                 </div>
                 <ul className="text-left space-y-3 mb-8">
@@ -414,7 +428,7 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    24/7 phone support
+                    Priority support
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -465,7 +479,7 @@ export default function PricingPage() {
                   <h4 className="text-lg font-medium text-text-primary">{selectedPlan.name} Plan</h4>
                   {selectedPlan.isTrial && (
                     <span className="inline-block bg-accent text-primary px-2 py-1 rounded-full text-xs font-semibold mt-1">
-                      3-Day Free Trial
+                      7-Day Free Trial
                     </span>
                   )}
                 </div>
@@ -489,7 +503,7 @@ export default function PricingPage() {
                   {selectedPlan.isTrial && (
                     <div className="bg-accent bg-opacity-10 rounded-lg p-3 mt-3">
                       <p className="text-sm text-primary font-medium">
-                        Free for 3 days, then ${selectedPlan.price}/{selectedPlan.interval === 'annually' ? 'year' : 'month'}
+                        Free for 7 days, then ${selectedPlan.price}/{selectedPlan.interval === 'annually' ? 'year' : 'month'}
                       </p>
                       <p className="text-xs text-secondary mt-1">
                         Cancel anytime during trial period
@@ -517,6 +531,15 @@ export default function PricingPage() {
                     )}
                   </ul>
                 </div>
+                {/* Trial Limits */}
+                {selectedPlan.isTrial &&
+                  <div className='bg-accent bg-opacity-10 rounded-lg p-3 mt-3'>
+                    <p className="text-sm text-primary mt-1 font-medium">Trial limits:</p>
+                    <p className="text-xs text-primary mt-1 font-medium">
+                      <span className='font-normal'>{selectedPlan.name === 'Starter' ? '10 PDFs, 20 messages' : '20 PDFs, 40 messages'}</span>
+                    </p>
+                  </div>
+                }
               </div>
             </div>
           </div>
