@@ -2,13 +2,16 @@
 
 import Link from 'next/link';
 import { useAuthStore } from '../store/auth';
+import { useSubscriptionStore } from '../store/subscription';
 import { useEffect, useState } from 'react';
 import { authService } from '../services/auth';
+import { subscriptionService } from '../services/subscription';
 import Image from 'next/image';
 import { initializePaddle } from '@paddle/paddle-js';
 
 export default function Home() {
   const { user, setUser } = useAuthStore();
+  const { isSubscriptionActive } = useSubscriptionStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   useEffect(() => {
@@ -30,6 +33,15 @@ export default function Home() {
         // Only check auth status, don't auto-redirect
         const currentUser = await authService.getMe();
         setUser(currentUser);
+        
+        // Load subscription data if user is authenticated
+        if (currentUser?.id) {
+          try {
+            await subscriptionService.loadUserSubscriptionData(currentUser.id);
+          } catch (error) {
+            console.error('Failed to load subscription data:', error);
+          }
+        }
       } catch (error) {
         // User not authenticated, which is fine for landing page
         setUser(null);
@@ -66,23 +78,30 @@ export default function Home() {
 
         <div className="space-y-4 sm:space-y-0 sm:space-x-4 sm:flex sm:justify-center">
           {user ? (
-            // Show app access for authenticated users
-            <Link
-              href="/app"
-              className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
-            >
-              Go to App
-            </Link>
-          ) : (
-            // Show signup/login for non-authenticated users
-            <>
+            // Show app access for authenticated users with active subscription, or trial button for those without
+            isSubscriptionActive() ? (
               <Link
-                href="/auth/signup"
+                href="/app"
                 className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
               >
-                Get Started
+                Go to App
               </Link>
-            </>
+            ) : (
+              <Link
+                href="/pricing"
+                className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
+              >
+                Start Free Trial
+              </Link>
+            )
+          ) : (
+            // Show Start Free Trial for non-authenticated users (takes them to signup)
+            <Link
+              href="/auth/signup"
+              className="inline-block bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-8 rounded-lg transition-colors duration-200 text-lg"
+            >
+              Start Free Trial
+            </Link>
           )}
         </div>
 

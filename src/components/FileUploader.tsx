@@ -2,22 +2,29 @@
 
 import { useState, useRef } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
+import { useSubscriptionStore } from '../store/subscription';
+import { useAuthStore } from '../store/auth';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { useChatStore } from '../store/chat';
 import { fileSystemService } from '../services/filesystem';
+import { subscriptionService } from '../services/subscription';
+import Tooltip from './Tooltip';
 import api from '../lib/api';
 
 interface FileUploaderProps {
   folderId?: string | null;
   onUploadComplete?: () => void;
   isIcon?: boolean;
+  disabled?: boolean;
 }
 
-export default function FileUploader({ folderId, onUploadComplete, isIcon = false }: FileUploaderProps) {
+export default function FileUploader({ folderId, onUploadComplete, isIcon = false, disabled = false }: FileUploaderProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentFolderId, addFile } = useFileSystemStore();
+  const { hasExceededFileLimit, getFilesRemaining } = useSubscriptionStore();
+  const { user } = useAuthStore();
   const { triggerExtraction, handleShowFile } = usePDFViewer();
   const { setCurrentReference } = useChatStore();
   
@@ -26,6 +33,25 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    // Check if user can upload files (hasn't exceeded limit)
+    if (!subscriptionService.canUploadFiles()) {
+      // Clear the input value to allow trying again later
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    // Check if uploading these files would exceed the limit
+    const filesRemaining = getFilesRemaining();
+    if (files.length > filesRemaining) {
+      // Clear the input value to allow trying again later
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
 
     try {
       setIsUploading(true);
@@ -98,6 +124,11 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
       clearInterval(interval);
       setUploadProgress(100);
       
+      // Refresh files count after successful upload
+      if (user?.id) {
+        await subscriptionService.refreshFilesCount(user.id);
+      }
+      
       // Reset after a short delay
       setTimeout(() => {
         setIsUploading(false);
@@ -115,6 +146,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   };
 
   const handleClick = () => {
+    if (disabled || isUploading || hasExceededFileLimit()) return;
     fileInputRef.current?.click();
   };
 
@@ -128,16 +160,24 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
           multiple
           className="hidden"
           onChange={handleFileChange}
-          disabled={isUploading}
+          disabled={isUploading || hasExceededFileLimit() || disabled}
         />
         <button
           onClick={handleClick}
-          disabled={isUploading}
-          className="text-text-primary hover:text-accent transition-colors focus:outline-none cursor-pointer"
-          title="Upload file"
+          disabled={isUploading || hasExceededFileLimit() || disabled}
+          className={`text-text-primary transition-colors focus:outline-none ${
+        hasExceededFileLimit() || disabled ? 'cursor-not-allowed opacity-60' : 'hover:text-accent cursor-pointer'
+          }`}
+          title={
+        disabled
+          ? "Subscribe to upload files"
+          : hasExceededFileLimit()
+          ? "You've reached your file upload limit"
+          : "Upload file"
+          }
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
         </button>
       </>
@@ -149,11 +189,18 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
       <label
         htmlFor={isIcon ? undefined : "file-upload"}
         className={`flex items-center justify-center w-full ${
-          isUploading
-            ? 'bg-accent bg-opacity-50 cursor-not-allowed'
+          isUploading || hasExceededFileLimit() || disabled
+            ? 'bg-accent/30 cursor-not-allowed'
             : 'bg-accent hover:bg-accent-300 cursor-pointer'
-        } text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200`}
+        } text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 ${
+          (isUploading || hasExceededFileLimit() || disabled) ? 'text-primary/60' : ''
+        }`}
         onClick={isIcon ? handleClick : undefined}
+        title={
+          disabled ? "Subscribe to upload files" :
+          hasExceededFileLimit() ? "You've reached your file upload limit" :
+          "Upload PDF files"
+        }
       >
         <svg 
           xmlns="http://www.w3.org/2000/svg" 
@@ -169,7 +216,9 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
             d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" 
           />
         </svg>
-        {isUploading ? `Uploading... ${uploadProgress}%` : 'Upload PDF'}
+        {isUploading ? `Uploading... ${uploadProgress}%` : 
+         disabled ? 'Upload Disabled' :
+         hasExceededFileLimit() ? 'Upload Limit Reached' : 'Upload PDF'}
       </label>
       <input
         ref={fileInputRef}
@@ -179,7 +228,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
         multiple
         className="hidden"
         onChange={handleFileChange}
-        disabled={isUploading}
+        disabled={isUploading || hasExceededFileLimit() || disabled}
       />
 
       {isUploading && (

@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
 import { fileSystemService } from '../services/filesystem';
 import { useUIStore } from '../store/ui';
+import { useSubscriptionStore } from '../store/subscription';
+import { subscriptionService } from '../services/subscription';
 import FolderTree from './FolderTree';
 import FileUploader from './FileUploader';
 
@@ -12,6 +14,10 @@ export default function Sidebar() {
   const [newFolderName, setNewFolderName] = useState('');
   const { isSidebarCollapsed, setSidebarCollapsed } = useUIStore();
   const { currentFolderId, addFolder } = useFileSystemStore();
+  const { getFilesRemaining, hasExceededFileLimit } = useSubscriptionStore();
+
+  // Check if user has app access for enabling/disabling features
+  const hasAppAccess = subscriptionService.hasAppAccess();
 
   // Function to handle sidebar collapse/expand
   const toggleSidebar = () => {
@@ -20,7 +26,7 @@ export default function Sidebar() {
 
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFolderName.trim()) return;
+    if (!newFolderName.trim() || !hasAppAccess) return;
     
     try {
       const newFolder = await fileSystemService.createFolder(
@@ -85,8 +91,14 @@ export default function Sidebar() {
 
           <div className="space-y-3 p-3 rounded-lg shadow-sm bg-background-primary/10">
             <button
-              onClick={() => setIsCreatingFolder(true)}
-              className="flex items-center justify-center w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
+              onClick={() => hasAppAccess && setIsCreatingFolder(true)}
+              disabled={!hasAppAccess}
+              className={`flex items-center justify-center w-full font-semibold py-2 px-4 rounded-lg transition-colors duration-200 ${
+                hasAppAccess 
+                  ? 'bg-accent hover:bg-accent-300 text-primary cursor-pointer' 
+                  : 'bg-accent/30 text-primary/60 cursor-not-allowed'
+              }`}
+              title={!hasAppAccess ? 'Subscribe to create folders' : 'Create a new folder'}
             >
               <svg 
                 xmlns="http://www.w3.org/2000/svg" 
@@ -105,7 +117,7 @@ export default function Sidebar() {
               Create New Folder
             </button>
             
-            <FileUploader />
+            <FileUploader disabled={!hasAppAccess} />
           </div>
         </div>
 

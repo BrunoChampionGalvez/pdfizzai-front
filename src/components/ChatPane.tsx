@@ -3,9 +3,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chat';
 import { useUIStore } from '../store/ui';
+import { useSubscriptionStore } from '../store/subscription';
+import { useAuthStore } from '../store/auth';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { chatService } from '../services/chat';
 import { fileSystemService } from '../services/filesystem';
+import { subscriptionService } from '../services/subscription';
 import { generateId } from '../lib/utils';
 import MessageBubble from './MessageBubble';
 import { MentionedMaterial, StudyMaterial } from '../types/chat';
@@ -31,6 +34,14 @@ export default function ChatPane() {
     addSession
   } = useChatStore();
   const { isSidebarCollapsed } = useUIStore();
+  const { 
+    hasExceededMessageLimit, 
+    getMessagesRemaining, 
+    getNextBillingDate, 
+    isSubscriptionActive,
+    getCurrentMessageLimit
+  } = useSubscriptionStore();
+  const { user } = useAuthStore();
   const { showFileDisplay } = usePDFViewer();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
@@ -332,6 +343,12 @@ export default function ChatPane() {
     e.preventDefault();
     if (!message.trim()) return;
     
+    // Check if user can send messages (hasn't exceeded limit)
+    if (!subscriptionService.canSendMessages()) {
+      setErrorMessage('You have reached your message limit for this billing period.');
+      return;
+    }
+    
     // Clear any previous error messages and set loading state
     setErrorMessage(null);
     setLoading(true);
@@ -456,6 +473,11 @@ export default function ChatPane() {
         } finally {
           // Always set loading to false when streaming is complete
           setLoading(false);
+          
+          // Refresh message usage after successful message sending
+          if (user?.id && accumulatedContent) {
+            await subscriptionService.refreshMessageUsage(user.id);
+          }
         }
       };
       
@@ -587,14 +609,51 @@ export default function ChatPane() {
                 </div>
               )}
 
+              {/* Message usage indicator for new session */}
+              {!hasExceededMessageLimit() && isSubscriptionActive() && getMessagesRemaining() <= 5 && (
+                <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-center">
+                    <svg className="h-4 w-4 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.856-.833-2.598 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                    <div>
+                      <p className="text-yellow-800 font-medium text-sm">Low message count</p>
+                      <p className="text-yellow-700 text-xs">
+                        {getMessagesRemaining()} messages remaining.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Message limit warning for new session */}
+              {hasExceededMessageLimit() && (
+                <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg">
+                  <div className="flex items-center">
+                    <svg className="h-5 w-5 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.856-.833-2.598 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                    <div>
+                      <p className="text-red-800 font-medium">Message limit reached</p>
+                      <p className="text-red-700 text-sm">
+                        You have used all {getCurrentMessageLimit()} messages allowed with your plan.
+                        {getNextBillingDate() && (
+                          <span> Your limit will reset on {getNextBillingDate()!.toLocaleDateString()}.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-end w-full min-h-[4rem]">
                 <textarea
                   value={message}
                   onChange={handleMessageChange}
                   onKeyDown={handleKeyDown}
-                  placeholder="Type your question here..."
+                  placeholder={hasExceededMessageLimit() ? "Message limit reached" : "Type your question here..."}
                   className="flex-1 bg-primary border border-secondary rounded-l-lg px-6 py-4 focus:outline-none focus:border-accent text-text-primary text-lg resize-none overflow-hidden min-h-[4rem] max-h-[10rem]"
-                  disabled={isLoading}
+                  disabled={isLoading || hasExceededMessageLimit()}
                   autoFocus
                   rows={1}
                   style={{
@@ -613,14 +672,15 @@ export default function ChatPane() {
                   onClick={toggleMentionSearch}
                   className="bg-secondary hover:bg-secondary-300 text-text-primary font-semibold px-4 py-4 transition-colors mention-trigger border border-secondary border-l-0 h-16"
                   title="Add files or folders to context"
+                  disabled={hasExceededMessageLimit()}
                 >
                   <span className="text-lg font-medium">@</span>
                 </button>
                 <button
                   type="submit"
-                  disabled={isLoading || !message.trim()}
+                  disabled={isLoading || !message.trim() || hasExceededMessageLimit()}
                   className={`bg-accent hover:bg-accent-300 text-primary font-semibold py-4 px-6 rounded-r-lg transition-colors text-lg h-16
-                    ${isLoading || !message.trim() ? 'opacity-50 cursor-not-allowed' : ' cursor-pointer'}`}
+                    ${isLoading || !message.trim() || hasExceededMessageLimit() ? 'opacity-50 cursor-not-allowed' : ' cursor-pointer'}`}
                 >
                   {isLoading ? <LoadingIcon /> : 'Ask RefDoc AI'}
                 </button>
@@ -728,14 +788,51 @@ export default function ChatPane() {
             </div>
           )}
 
+          {/* Message usage indicator */}
+          {!hasExceededMessageLimit() && isSubscriptionActive() && getMessagesRemaining() <= 5 && (
+            <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center">
+                <svg className="h-4 w-4 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.856-.833-2.598 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-yellow-800 font-medium text-sm">Low message count</p>
+                  <p className="text-yellow-700 text-xs">
+                    {getMessagesRemaining()} messages remaining.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Message limit warning */}
+          {hasExceededMessageLimit() && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg">
+              <div className="flex items-center">
+                <svg className="h-5 w-5 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.856-.833-2.598 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-red-800 font-medium">Message limit reached</p>
+                  <p className="text-red-700 text-sm">
+                    You have used all {getCurrentMessageLimit()} messages allowed with your plan.
+                    {getNextBillingDate() && (
+                      <span> Your limit will reset on {getNextBillingDate()!.toLocaleDateString()}.</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="flex items-end">
             <textarea
               value={message}
               onChange={handleMessageChange}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a follow-up question..."
+              placeholder={hasExceededMessageLimit() ? "Message limit reached" : "Ask a follow-up question..."}
               className="flex-1 bg-primary border border-secondary rounded-l-lg px-4 py-2 focus:outline-none focus:border-accent text-text-primary resize-none overflow-hidden min-h-[2.5rem] max-h-[10rem]"
-              disabled={isLoading}
+              disabled={isLoading || hasExceededMessageLimit()}
               rows={1}
               style={{
                 height: 'auto',
@@ -758,9 +855,9 @@ export default function ChatPane() {
             </button>
             <button
               type="submit"
-              disabled={isLoading || !message.trim()}
+              disabled={isLoading || !message.trim() || hasExceededMessageLimit()}
               className={`bg-accent hover:bg-accent-300 text-primary font-semibold px-4 py-2 rounded-r-lg transition-colors h-10
-                ${isLoading || !message.trim() ? 'cursor-not-allowed' : ''}`}
+                ${isLoading || !message.trim() || hasExceededMessageLimit() ? 'cursor-not-allowed opacity-50' : ''}`}
             >
               {isLoading ? <LoadingIcon /> : <SendIcon />}
             </button>

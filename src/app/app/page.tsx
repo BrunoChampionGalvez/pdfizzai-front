@@ -4,10 +4,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFileSystemStore } from '../../store/filesystem';
 import { useChatStore } from '../../store/chat';
+import { useAuthStore } from '../../store/auth';
+import { useSubscriptionStore } from '../../store/subscription';
 import { usePDFViewer } from '../../contexts/PDFViewerContext';
 import { fileSystemService } from '../../services/filesystem';
 import { chatService } from '../../services/chat';
 import { authService } from '../../services/auth';
+import { subscriptionService } from '../../services/subscription';
 import ChatPane from '../../components/ChatPane';
 import PDFViewer from '../../components/PDFContainer';
 import { setRedirectPath } from '../../lib/auth-utils';
@@ -24,6 +27,8 @@ export default function AppPage() {
     addSession,
     setLoading: setChatLoading 
   } = useChatStore();
+  const { user } = useAuthStore();
+  const { isSubscriptionActive, dbSubscription } = useSubscriptionStore();
   const { showFileDisplay } = usePDFViewer();
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +69,35 @@ export default function AppPage() {
         }
         
         console.log('User is logged in, proceeding with app initialization');
+        
+        // Load subscription data for authenticated user
+        if (user?.id) {
+          try {
+            await subscriptionService.loadUserSubscriptionData(user.id);
+            console.log('Subscription data loaded successfully');
+            
+            // Check subscription status but DON'T redirect - let user access app regardless
+            const hasAccess = subscriptionService.hasAppAccess();
+            const userIsSubscriptionActive = isSubscriptionActive();
+            
+            if (!hasAccess && !userIsSubscriptionActive) {
+              console.log('User does not have active subscription, but allowing app access with prompts');
+              setError('Subscribe to unlock full access to RefDoc AI features');
+            } else if (!userIsSubscriptionActive) {
+              // User has canceled subscription but still has access until end of billing period
+              console.log('User has canceled subscription but retains access until billing period ends');
+              setError(null); // Don't show subscription error for canceled users with remaining access
+            } else {
+              console.log('User has active subscription');
+              setError(null); // Clear any previous subscription errors
+            }
+          } catch (error) {
+            console.error('Failed to load subscription data:', error);
+            // Allow user to continue but show error
+            setError('Failed to load subscription information');
+          }
+        }
+        
       } catch (error) {
         console.error('Auth check failed:', error);
         setRedirectPath(window.location.pathname);
@@ -73,7 +107,106 @@ export default function AppPage() {
     };
 
     checkAuth();
-  }, [router]);
+  }, [router, user?.id]);
+
+  // Conditionally refresh subscription data to catch webhook updates after payment
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const refreshSubscription = async () => {
+      try {
+        await subscriptionService.loadUserSubscriptionData(user.id);
+        
+        // If subscription becomes active, clear any subscription errors
+        if (subscriptionService.hasAppAccess() && error?.includes('Subscribe to unlock')) {
+          setError(null);
+          console.log('Subscription activated - clearing subscription error');
+          
+          // Clean up URL parameters if they exist (likely from payment redirect)
+          if (window.location.search) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+          
+          // Stop polling once subscription is activated
+          return true; // Signal to stop polling
+        }
+        
+        // Also stop polling if user has a canceled subscription but still has access
+        // This prevents infinite polling for canceled subscriptions
+        if (dbSubscription?.status === 'canceled' || dbSubscription?.scheduledCancel) {
+          console.log('User has canceled subscription - stopping polling');
+          return true; // Signal to stop polling
+        }
+      } catch (err) {
+        console.error('Failed to refresh subscription data:', err);
+      }
+      return false; // Continue polling
+    };
+
+    // Check for URL parameters that might indicate recent payment
+    const urlParams = new URLSearchParams(window.location.search);
+    const mightBeFromPayment = urlParams.size > 0; // Any URL params might indicate redirect from payment
+    
+    // Only poll if there's a subscription error (user needs subscription) or if coming from payment
+    // But don't poll for canceled subscriptions that still have access
+    const needsPolling = (error?.includes('Subscribe to unlock') || mightBeFromPayment) && 
+                        !(dbSubscription?.status === 'canceled' || dbSubscription?.scheduledCancel);
+    
+    if (needsPolling) {
+      console.log('Starting subscription polling due to:', mightBeFromPayment ? 'payment redirect detected' : 'subscription required');
+      console.log('Current subscription status:', dbSubscription?.status, 'scheduledCancel:', dbSubscription?.scheduledCancel);
+      
+      // Start with immediate check, then few quick checks
+      const quickChecks = [0, 2000, 5000, 10000]; // Check immediately, then at 2s, 5s, 10s
+      let pollingStopped = false;
+      
+      const runQuickChecks = async () => {
+        for (const delay of quickChecks) {
+          if (pollingStopped) break;
+          
+          await new Promise(resolve => setTimeout(resolve, delay));
+          if (pollingStopped) break;
+          
+          const shouldStop = await refreshSubscription();
+          if (shouldStop) {
+            pollingStopped = true;
+            break;
+          }
+        }
+        
+        // If still need polling after quick checks, use longer intervals (only for subscription errors)
+        if (!pollingStopped && error?.includes('Subscribe to unlock')) {
+          const interval = setInterval(async () => {
+            const shouldStop = await refreshSubscription();
+            if (shouldStop) {
+              clearInterval(interval);
+            }
+          }, 60000); // Check every 60 seconds instead of 30
+          
+          // Stop polling after 10 minutes max
+          setTimeout(() => {
+            clearInterval(interval);
+            pollingStopped = true;
+          }, 10 * 60 * 1000);
+          
+          return () => {
+            clearInterval(interval);
+            pollingStopped = true;
+          };
+        }
+      };
+      
+      runQuickChecks();
+      
+      return () => {
+        pollingStopped = true;
+      };
+    }
+    
+    // No polling needed if user has access and no payment indicators
+    console.log('No subscription polling needed - user has access or no payment detected');
+    console.log('Polling decision - needsPolling:', needsPolling, 'error:', error, 'mightBeFromPayment:', mightBeFromPayment, 'canceled:', dbSubscription?.status === 'canceled' || dbSubscription?.scheduledCancel);
+  }, [user?.id, error]);
 
   // Load initial folders and files
   useEffect(() => {
@@ -139,17 +272,37 @@ export default function AppPage() {
   }
 
   if (error) {
+    // Check if this is a subscription-related error
+    const isSubscriptionError = error.includes('Subscribe to unlock') || error.includes('subscription');
+    
     return (
-      <div className="flex items-center justify-center p-4">
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-          <p className="font-bold">Error</p>
+      <div className="flex items-center justify-center p-4 h-full">
+        <div className={`border px-4 py-3 rounded flex flex-col justify-center items-center ${
+          isSubscriptionError 
+            ? 'bg-blue-50 border-blue-200 text-blue-800' 
+            : 'bg-red-100 border-red-400 text-red-700'
+        }`}>
+          <p className="font-bold">{isSubscriptionError ? 'Subscription Required' : 'Error'}</p>
           <p>{error}</p>
-          <button 
-            className="mt-2 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
-            onClick={() => window.location.reload()}
-          >
-            Retry
-          </button>
+          <div className="mt-3 flex gap-2">
+            {isSubscriptionError ? (
+              <>
+                <button 
+                  className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-sm cursor-pointer"
+                  onClick={() => router.push('/pricing')}
+                >
+                  View Plans
+                </button>
+              </>
+            ) : (
+              <button 
+                className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );

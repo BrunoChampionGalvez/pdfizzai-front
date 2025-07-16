@@ -6,7 +6,9 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/auth';
+import { useSubscriptionStore } from '../../store/subscription';
 import { authService } from '../../services/auth';
+import { subscriptionService } from '../../services/subscription';
 import { setRedirectPath } from '../../lib/auth-utils';
 
 enum PlanName {
@@ -18,7 +20,9 @@ enum PlanName {
 export default function PricingPage() {
   const [isAnnual, setIsAnnual] = useState(false);
   const { user, isAuthenticated, setUser } = useAuthStore();
+  const { dbSubscription, isSubscriptionActive } = useSubscriptionStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<{
     name: string;
     price: string;
@@ -26,6 +30,43 @@ export default function PricingPage() {
     isTrial: boolean;
   } | null>(null);
   const router = useRouter();
+
+  // Function to poll for subscription activation after payment
+  const pollForSubscriptionActivation = async (userId: string) => {
+    const maxAttempts = 30; // Poll for up to 30 attempts (1 minute at 2-second intervals)
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      try {
+        console.log(`Polling for subscription activation, attempt ${attempts + 1}/${maxAttempts}`);
+        
+        // Refresh subscription data
+        await subscriptionService.loadUserSubscriptionData(userId);
+        
+        // Check if subscription is now active
+        if (subscriptionService.hasAppAccess()) {
+          console.log('Subscription activated! Redirecting to app...');
+          setIsProcessingPayment(false);
+          router.push('/app');
+          return;
+        }
+        
+        // Wait 2 seconds before next attempt
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        attempts++;
+        
+      } catch (error) {
+        console.error('Error polling for subscription:', error);
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    // If we get here, polling timed out
+    console.log('Subscription polling timed out, redirecting anyway...');
+    setIsProcessingPayment(false);
+    router.push('/app'); // Redirect anyway - app will handle the subscription check
+  };
 
   const monthlyStarter: Paddle.CheckoutLineItem[] = [{
     priceId: 'pri_01jzvtb4tanwae3pv22fyewn0g',
@@ -98,6 +139,22 @@ export default function PricingPage() {
       try {
         const currentUser = await authService.getMe();
         setUser(currentUser);
+        
+        // Load subscription data if user is authenticated
+        if (currentUser?.id) {
+          try {
+            await subscriptionService.loadUserSubscriptionData(currentUser.id);
+            
+            // If user already has active subscription, redirect to app
+            if (subscriptionService.hasAppAccess()) {
+              console.log('User has active subscription, redirecting to app');
+              router.push('/app');
+              return;
+            }
+          } catch (error) {
+            console.error('Failed to load subscription data:', error);
+          }
+        }
       } catch (error) {
         // User not authenticated, which is fine for pricing page
         setUser(null);
@@ -118,6 +175,19 @@ export default function PricingPage() {
       const paddle = await Paddle.initializePaddle({
         token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
         environment: 'sandbox',
+        eventCallback: async (event) => {
+          if (event.name === 'checkout.completed') {
+            console.log('Payment completed, starting subscription verification...');
+            setIsProcessingPayment(true);
+            
+            // Start polling for subscription activation instead of immediate redirect
+            if (user?.id) {
+              await pollForSubscriptionActivation(user.id);
+            }
+          } else if (event.type === 'checkout.close') {
+            console.log('Checkout closed');
+          }
+        },
         checkout: {
           settings: {
             displayMode: 'inline',
@@ -148,6 +218,19 @@ export default function PricingPage() {
           const paddle = await Paddle.initializePaddle({
             token: 'test_2e2147bc43b16fada23cc993b41',
             environment: 'sandbox',
+            eventCallback: async (event) => {
+              if (event.name === 'checkout.completed') {
+                console.log('Payment completed, starting subscription verification...');
+                setIsProcessingPayment(true);
+                
+                // Start polling for subscription activation instead of immediate redirect
+                if (user?.id) {
+                  await pollForSubscriptionActivation(user.id);
+                }
+              } else if (event.type === 'checkout.close') {
+                console.log('Checkout closed');
+              }
+            },
             checkout: {
               settings: {
                 displayMode: 'inline',
@@ -173,11 +256,21 @@ export default function PricingPage() {
     setSelectedPlan(null);
   }
 
-  // Show loading while checking authentication
-  if (isCheckingAuth) {
+  // Show loading while checking authentication or processing payment
+  if (isCheckingAuth || isProcessingPayment) {
     return (
       <div className="min-h-screen bg-primary flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent mx-auto mb-4"></div>
+          <p className="text-text-primary text-lg">
+            {isProcessingPayment ? 'Processing your payment...' : 'Loading...'}
+          </p>
+          {isProcessingPayment && (
+            <p className="text-secondary text-sm mt-2">
+              Please wait while we activate your subscription
+            </p>
+          )}
+        </div>
       </div>
     );
   }
@@ -266,42 +359,57 @@ export default function PricingPage() {
                 </ul>
               </div>
               <div className="space-y-3">
-                {isAuthenticated 
-                ? <button 
-                    className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
-                    onClick={() => openCheckout(
-                      monthlyStarterWithTrial, 
-                      {
+                {/* Show subscription status if user has active subscription */}
+                {isAuthenticated && isSubscriptionActive() ? (
+                  <div className="text-center">
+                    <div className="w-full bg-green-100 text-green-800 border border-green-300 font-semibold py-3 px-6 rounded-lg">
+                      ✓ Already Subscribed
+                    </div>
+                    <p className="text-sm text-secondary mt-2">
+                      {dbSubscription?.status === 'trialing' ? 'You are currently on a trial' : 'You have an active subscription'}
+                    </p>
+                  </div>
+                ) : isAuthenticated ? (
+                  <>
+                    <button 
+                      className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
+                      onClick={() => openCheckout(
+                        monthlyStarterWithTrial, 
+                        {
+                          name: 'Starter',
+                          price: '5.90',
+                          interval: 'monthly',
+                          isTrial: true
+                        }
+                      )}
+                    >
+                      Start Free Trial
+                    </button>
+                    <button 
+                      className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
+                      onClick={() => openCheckout(isAnnual ? yearlyStarter : monthlyStarter, {
                         name: 'Starter',
-                        price: '5.90',
-                        interval: 'monthly',
-                        isTrial: true
-                      }
-                    )}
-                  >
-                    Start Free Trial
-                  </button>   
-                : <button
+                        price: isAnnual ? '59.80' : '5.90',
+                        interval: isAnnual ? 'annually' : 'monthly',
+                        isTrial: false
+                      })}
+                    >
+                      Subscribe Now
+                    </button>
+                  </>
+                ) : (
+                  <button
                     className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
                     onClick={() => router.push('/auth/signup?redirect=/pricing')}
                   >
                     Sign Up for Free Trial
                   </button>
-                }
-                <button 
-                  className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
-                  onClick={() => openCheckout(isAnnual ? yearlyStarter : monthlyStarter, {
-                    name: 'Starter',
-                    price: isAnnual ? '59.80' : '5.90',
-                    interval: isAnnual ? 'annually' : 'monthly',
-                    isTrial: false
-                  })}
-                >
-                  Subscribe Now
-                </button>
-                <p className="text-xs text-secondary mt-2">
-                  Cancel anytime during trial
-                </p>
+                )}
+                {!isAuthenticated || !isSubscriptionActive() ? (
+                  <p className="text-xs text-secondary mt-2">
+                    Cancel anytime during trial
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -344,7 +452,7 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    500 AI chat messages
+                    400 AI chat messages
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -355,42 +463,57 @@ export default function PricingPage() {
                 </ul>
               </div>
               <div className="space-y-3">
-                {isAuthenticated 
-                ? <button 
-                    className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
-                    onClick={() => openCheckout(
-                      monthlyProWithTrial, 
-                      {
+                {/* Show subscription status if user has active subscription */}
+                {isAuthenticated && isSubscriptionActive() ? (
+                  <div className="text-center">
+                    <div className="w-full bg-green-100 text-green-800 border border-green-300 font-semibold py-3 px-6 rounded-lg">
+                      ✓ Already Subscribed
+                    </div>
+                    <p className="text-sm text-secondary mt-2">
+                      {dbSubscription?.status === 'trialing' ? 'You are currently on a trial' : 'You have an active subscription'}
+                    </p>
+                  </div>
+                ) : isAuthenticated ? (
+                  <>
+                    <button 
+                      className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
+                      onClick={() => openCheckout(
+                        monthlyProWithTrial, 
+                        {
+                          name: 'Pro',
+                          price: '9.90',
+                          interval: 'monthly',
+                          isTrial: true
+                        }
+                      )}
+                    >
+                      Start Free Trial
+                    </button>
+                    <button
+                      className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
+                      onClick={() => openCheckout(isAnnual ? yearlyPro : monthlyPro, {
                         name: 'Pro',
-                        price: '9.90',
-                        interval: 'monthly',
-                        isTrial: true
-                      }
-                    )}
-                  >
-                    Start Free Trial
-                  </button>   
-                : <button
+                        price: isAnnual ? '99' : '9.90',
+                        interval: isAnnual ? 'annually' : 'monthly',
+                        isTrial: false
+                      })}
+                    >
+                      Subscribe Now
+                    </button>
+                  </>
+                ) : (
+                  <button
                     className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
                     onClick={() => router.push('/auth/signup?redirect=/pricing')}
                   >
                     Sign Up for Free Trial
                   </button>
-                }
-                <button
-                  className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
-                  onClick={() => openCheckout(isAnnual ? yearlyPro : monthlyPro, {
-                    name: 'Pro',
-                    price: isAnnual ? '99' : '9.90',
-                    interval: isAnnual ? 'annually' : 'monthly',
-                    isTrial: false
-                  })}
-                >
-                  Subscribe Now
-                </button>
-                <p className="text-xs text-secondary mt-2">
-                  Cancel anytime during trial
-                </p>
+                )}
+                {!isAuthenticated || !isSubscriptionActive() ? (
+                  <p className="text-xs text-secondary mt-2">
+                    Cancel anytime during trial
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -422,7 +545,7 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    500 AI chat messages / user
+                    400 AI chat messages / user
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -525,7 +648,7 @@ export default function PricingPage() {
                     ) : (
                       <>
                         <li>• 500 PDF uploads</li>
-                        <li>• 500 AI chat messages</li>
+                        <li>• 400 AI chat messages</li>
                         <li>• Priority support</li>
                       </>
                     )}

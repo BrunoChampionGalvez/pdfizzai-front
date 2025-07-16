@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
+import { useSubscriptionStore } from '../store/subscription';
+import { useAuthStore } from '../store/auth';
 import { fileSystemService, Folder, File as FileType } from '../services/filesystem';
+import { subscriptionService } from '../services/subscription';
 import { useChatStore } from '../store/chat';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { formatFileSize } from '../lib/utils';
@@ -13,6 +16,11 @@ import api from '../lib/api';
 
 export default function FolderTree() {
   const { folders, files, currentFolderId, setCurrentFolderId, isLoading, addFolder, removeFolder, removeFile, addFile, setFiles } = useFileSystemStore();
+  const { hasExceededFileLimit, getFilesRemaining, getCurrentFileLimit } = useSubscriptionStore();
+  const { user } = useAuthStore();
+  
+  // Check if user has app access for enabling/disabling features
+  const hasAppAccess = subscriptionService.hasAppAccess();
   
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
   const [draggedItem, setDraggedItem] = useState<{ type: 'folder' | 'file', id: string } | null>(null);
@@ -324,6 +332,11 @@ export default function FolderTree() {
       } else {
         await fileSystemService.deleteFile(itemToDelete.id);
         removeFile(itemToDelete.id);
+        
+        // Refresh files count after successful deletion
+        if (user?.id) {
+          await subscriptionService.refreshFilesCount(user.id);
+        }
       }
       
       setDeleteModalOpen(false);
@@ -575,7 +588,7 @@ export default function FolderTree() {
             {hasContent && (
               <svg 
                 xmlns="http://www.w3.org/2000/svg" 
-                className={`h-4 w-4 mr-1 transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                className={`h-5 w-5 mr-1 transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                 fill="none" 
                 viewBox="0 0 24 24" 
                 stroke="currentColor"
@@ -592,12 +605,17 @@ export default function FolderTree() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                openNewFolderModal(folder.id);
+                if (hasAppAccess) openNewFolderModal(folder.id);
               }}
-              className="text-text-primary hover:text-accent transition-colors focus:outline-none cursor-pointer"
-              title="New folder"
+              disabled={!hasAppAccess}
+              className={`transition-colors focus:outline-none ${
+                hasAppAccess 
+                  ? 'text-text-primary hover:text-accent cursor-pointer' 
+                  : 'text-gray-400 cursor-not-allowed opacity-50'
+              }`}
+              title={hasAppAccess ? "New folder" : "Subscribe to create folders"}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
               </svg>
             </button>
@@ -606,6 +624,7 @@ export default function FolderTree() {
             <FileUploader
               folderId={folder.id}
               isIcon={true}
+              disabled={!hasAppAccess}
             />
             
             {/* Delete folder button */}
@@ -614,7 +633,7 @@ export default function FolderTree() {
               className="text-text-primary hover:text-accent-300 transition-colors focus:outline-none cursor-pointer"
               title="Delete folder"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </button>
@@ -677,7 +696,7 @@ export default function FolderTree() {
                 className="text-text-primary hover:text-accent-300 opacity-0 group-hover:opacity-100 transition-opacity focus:outline-none cursor-pointer"
                 title="Delete file"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
               </button>
@@ -720,7 +739,7 @@ export default function FolderTree() {
               className="flex items-center text-accent hover:text-accent-300 text-sm transition-colors cursor-pointer"
               title="Go back to previous view"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
               Back
@@ -734,6 +753,23 @@ export default function FolderTree() {
               `Levels ${viewStartLevel + 1}-${viewStartLevel + 3}`
             }
           </span>
+        </div>
+      )}
+
+      {/* File limit warning */}
+      {hasExceededFileLimit() && (
+        <div className="mb-3 p-2 bg-red-100 border border-red-300 rounded-lg">
+          <div className="flex items-center">
+            <svg className="h-5 w-5 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.856-.833-2.598 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <div>
+              <p className="text-red-800 font-medium text-sm">File upload limit reached</p>
+              <p className="text-red-700 text-xs">
+                You have used all {getCurrentFileLimit()} files allowed with your plan.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -754,12 +790,17 @@ export default function FolderTree() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                openNewFolderModal(null);
+                if (hasAppAccess) openNewFolderModal(null);
               }}
-              className="hover:text-accent text-text-primary transition-colors focus:outline-none cursor-pointer"
-              title="New folder"
+              disabled={!hasAppAccess}
+              className={`transition-colors focus:outline-none ${
+                hasAppAccess 
+                  ? 'hover:text-accent text-text-primary cursor-pointer' 
+                  : 'text-gray-400 cursor-not-allowed opacity-50'
+              }`}
+              title={hasAppAccess ? "New folder" : "Subscribe to create folders"}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
               </svg>
             </button>
@@ -768,6 +809,7 @@ export default function FolderTree() {
             <FileUploader
               folderId={null}
               isIcon={true}
+              disabled={!hasAppAccess}
             />
           </div>
         </div>
@@ -904,7 +946,7 @@ export default function FolderTree() {
 // File icon component
 function FileIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path 
         strokeLinecap="round" 
         strokeLinejoin="round" 
@@ -918,11 +960,11 @@ function FileIcon() {
 // Icon components
 function FolderIcon({ expanded = false }) {
   return expanded ? (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
     </svg>
   ) : (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-accent/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
     </svg>
   );

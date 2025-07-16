@@ -4,13 +4,16 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useAuthStore } from '../store/auth';
 import { useChatStore } from '../store/chat';
+import { useSubscriptionStore } from '../store/subscription';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '../services/auth';
+import { subscriptionService } from '../services/subscription';
 
 export default function Navbar() {
   const { user, setUser } = useAuthStore();
   const { clearAll } = useChatStore();
+  const { isSubscriptionActive } = useSubscriptionStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -21,6 +24,15 @@ export default function Navbar() {
       try {
         const currentUser = await authService.getMe();
         setUser(currentUser);
+        
+        // Load subscription data if user is authenticated
+        if (currentUser?.id) {
+          try {
+            await subscriptionService.loadUserSubscriptionData(currentUser.id);
+          } catch (error) {
+            console.error('Failed to load subscription data:', error);
+          }
+        }
       } catch (error) {
         setUser(null);
       } finally {
@@ -59,8 +71,8 @@ export default function Navbar() {
               <Image 
                 src="/refdoc-ai-logo.png" 
                 alt="RefDoc AI Logo" 
-                width={120} 
-                height={120}
+                width={150} 
+                height={150}
               />
             </Link>
           </div>
@@ -91,12 +103,21 @@ export default function Navbar() {
             ) : user ? (
               // Show app access and logout for authenticated users
               <>
-                <Link
-                  href="/app"
-                  className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-md transition-colors duration-200 text-sm"
-                >
-                  Go to App
-                </Link>
+                {isSubscriptionActive() ? (
+                  <Link
+                    href="/app"
+                    className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-md transition-colors duration-200 text-sm"
+                  >
+                    Go to App
+                  </Link>
+                ) : (
+                  <Link
+                    href="/pricing"
+                    className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-md transition-colors duration-200 text-sm"
+                  >
+                    Start Free Trial
+                  </Link>
+                )}
                 <button
                   onClick={handleLogout}
                   disabled={isLoggingOut}
@@ -169,13 +190,23 @@ export default function Navbar() {
             <div className="pt-4 pb-3 border-t border-secondary space-y-2">
               {user ? (
                 <>
-                  <Link
-                    href="/app"
-                    className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-3 rounded-md transition-colors duration-200 text-sm block text-center"
-                    onClick={() => setIsMobileMenuOpen(false)}
-                  >
-                    Go to App
-                  </Link>
+                  {isSubscriptionActive() ? (
+                    <Link
+                      href="/app"
+                      className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-3 rounded-md transition-colors duration-200 text-sm block text-center"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      Go to App
+                    </Link>
+                  ) : (
+                    <Link
+                      href="/pricing"
+                      className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-3 rounded-md transition-colors duration-200 text-sm block text-center"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      Start Free Trial
+                    </Link>
+                  )}
                   <button
                     onClick={() => {
                       handleLogout();
