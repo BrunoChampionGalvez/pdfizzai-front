@@ -61,7 +61,7 @@ export default function SignupPage() {
         </h2>
         
         {error && (
-          <div className="bg-red-500 bg-opacity-10 border border-red-500 text-red-500 p-3 rounded-lg mb-4">
+          <div className="bg-red-500 bg-opacity-10 border border-red-500 text-white p-3 rounded-lg mb-4">
             {error}
           </div>
         )}

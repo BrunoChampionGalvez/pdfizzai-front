@@ -5,6 +5,7 @@ interface User {
   email: string;
   name?: string;
   country?: string;
+  paddleCustomerId?: string;
 }
 
 interface AuthState {

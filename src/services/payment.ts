@@ -1,3 +1,4 @@
+import { SubscriptionStatus } from '@/app/subscription/page';
 import api from '../lib/api';
 
 interface PaddleSubscription {
@@ -9,10 +10,14 @@ interface PaddleSubscription {
 export interface DbSubscription {
     id: string;
     paddleSubscriptionId: string;
-    status: string;
+    status: SubscriptionStatus;
     scheduledCancel: boolean;
     hasFullAccess: boolean;
     nextBillingAt: Date;
+    messagesLeftBeforeUpgrade: number;
+    filesLeftBeforeUpgrade: number;
+    hasUpgraded: boolean;
+    billingBeforeUpgrade: Date | null;
     hasTrialPeriod: boolean;
     name: string;
     price: number;
@@ -45,6 +50,11 @@ export interface SubscriptionPlan {
     trialFilesLimit: number;
     currency: string;
     createdAt: Date;
+}
+
+export interface AuthToken {
+    customer_auth_token: string;
+    expires_at: string;
 }
 
 export const paymentService = {
@@ -132,6 +142,50 @@ export const paymentService = {
         }
         catch (error) {
             console.error('PaymentService: Error canceling subscription', error);
+            throw error;
+        }
+    },
+
+    async generateAuthTokenCustomer(customerId: string): Promise<AuthToken> {
+        try {
+            const response = await api.get(`/api/payment/auth-token/customer/${customerId}`);
+            return response.data;
+        }
+        catch (error) {
+            console.error('PaymentService: Error generating auth token for customer', error);
+            throw error;
+        }
+    },
+
+    async upgradeSubscription(subscriptionId: string | undefined): Promise<boolean> {
+        try {
+            const response = await api.patch(`/api/payment/upgrade-subscription/${subscriptionId}`);
+            return response.data;
+        }
+        catch (error) {
+            console.error('PaymentService: Error upgrading subscription', error);
+            throw error;
+        }
+    },
+
+    async downgradeSubscription(subscriptionId: string | undefined): Promise<boolean> {
+        try {
+            const response = await api.patch(`/api/payment/downgrade-subscription/${subscriptionId}`);
+            return response.data;
+        }
+        catch (error) {
+            console.error('PaymentService: Error downgrading subscription', error);
+            throw error;
+        }
+    },
+
+    async reactivateSubscription(subscriptionId: string | undefined): Promise<boolean> {
+        try {
+            const response = await api.patch(`/api/payment/reactivate-subscription/${subscriptionId}`);
+            return response.data;
+        }
+        catch (error) {
+            console.error('PaymentService: Error reactivating subscription', error);
             throw error;
         }
     },

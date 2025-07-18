@@ -133,4 +133,17 @@ export const subscriptionService = {
     const { reset } = useSubscriptionStore.getState();
     reset();
   },
+
+  /**
+   * Generate customer auth token for Paddle checkout
+   */
+  async generateCustomerAuthToken(customerId: string): Promise<string | null> {
+    try {
+      const authToken = await paymentService.generateAuthTokenCustomer(customerId);
+      return authToken.customer_auth_token;
+    } catch (error) {
+      console.error('Error generating customer auth token:', error);
+      return null;
+    }
+  },
 };

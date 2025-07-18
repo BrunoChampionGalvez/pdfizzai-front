@@ -11,7 +11,7 @@ import { authService } from '../../services/auth';
 import { subscriptionService } from '../../services/subscription';
 import { setRedirectPath } from '../../lib/auth-utils';
 
-enum PlanName {
+export enum PlanName {
   STARTER = 'starter',
   PRO = 'pro',
   ENTERPRISE = 'enterprise',
