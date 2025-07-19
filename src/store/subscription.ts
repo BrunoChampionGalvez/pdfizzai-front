@@ -65,7 +65,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     if (!subscriptionUsage) return false; // If we don't know the usage, allow messages
     
     const messageLimit = get().getCurrentMessageLimit(); // This now handles missing subscription/plan
-    return subscriptionUsage.messagesUsed >= messageLimit;
+    return subscriptionUsage.messagesUsed >= messageLimit + (dbSubscription?.messagesLeftBeforeUpgrade || 0);
   },
   
   // Check if user has exceeded file limit
@@ -74,7 +74,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     if (!userFilesCount) return false; // If we don't know the count, allow uploads
     
     const fileLimit = get().getCurrentFileLimit(); // This now handles missing subscription/plan
-    return userFilesCount.totalFiles >= fileLimit;
+    return userFilesCount.totalFiles >= fileLimit + (dbSubscription?.filesLeftBeforeUpgrade || 0);
   },
   
   // Get current message limit based on trial status
@@ -85,7 +85,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const isTrialUser = get().isTrialUser();
     return isTrialUser 
       ? dbSubscription.plan.trialMessagesLimit 
-      : dbSubscription.plan.messagesLimit;
+      : dbSubscription.plan.messagesLimit + (dbSubscription?.messagesLeftBeforeUpgrade || 0);
   },
   
   // Get current file limit based on trial status
@@ -96,25 +96,25 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const isTrialUser = get().isTrialUser();
     return isTrialUser 
       ? dbSubscription.plan.trialFilesLimit 
-      : dbSubscription.plan.filesLimit;
+      : dbSubscription.plan.filesLimit + (dbSubscription?.filesLeftBeforeUpgrade || 0);
   },
   
   // Get remaining messages
   getMessagesRemaining: () => {
-    const { subscriptionUsage } = get();
+    const { subscriptionUsage, dbSubscription } = get();
     const messageLimit = get().getCurrentMessageLimit();
     if (!subscriptionUsage) return messageLimit;
-    
-    return Math.max(0, messageLimit - subscriptionUsage.messagesUsed);
+
+    return Math.max(0, (messageLimit + (dbSubscription?.messagesLeftBeforeUpgrade || 0)) - subscriptionUsage.messagesUsed);
   },
   
   // Get remaining files
   getFilesRemaining: () => {
-    const { userFilesCount } = get();
+    const { userFilesCount, dbSubscription } = get();
     const fileLimit = get().getCurrentFileLimit();
     if (!userFilesCount) return fileLimit;
-    
-    return Math.max(0, fileLimit - userFilesCount.totalFiles);
+
+    return Math.max(0, (fileLimit + (dbSubscription?.filesLeftBeforeUpgrade || 0)) - userFilesCount.totalFiles);
   },
   
   // Get next billing date

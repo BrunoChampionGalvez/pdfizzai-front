@@ -17,6 +17,7 @@ export interface DbSubscription {
     messagesLeftBeforeUpgrade: number;
     filesLeftBeforeUpgrade: number;
     hasUpgraded: boolean;
+    hasDowngraded: boolean;
     billingBeforeUpgrade: Date | null;
     hasTrialPeriod: boolean;
     name: string;
@@ -186,6 +187,17 @@ export const paymentService = {
         }
         catch (error) {
             console.error('PaymentService: Error reactivating subscription', error);
+            throw error;
+        }
+    },
+
+    async cancelDowngrade(subscriptionId: string | undefined): Promise<boolean> {
+        try {
+            const response = await api.patch(`/api/payment/cancel-downgrade/${subscriptionId}`);
+            return response.data;
+        }
+        catch (error) {
+            console.error('PaymentService: Error canceling downgrade', error);
             throw error;
         }
     },

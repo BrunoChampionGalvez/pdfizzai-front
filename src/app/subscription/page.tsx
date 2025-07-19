@@ -65,6 +65,10 @@ function SubscriptionPageContent() {
     getNextBillingDate
   } = useSubscriptionStore();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessingUpgrade, setIsProcessingUpgrade] = useState(false);
+  const [isProcessingDowngrade, setIsProcessingDowngrade] = useState(false);
+  const [isProcessingCancelDowngrade, setIsProcessingCancelDowngrade] = useState(false);
+  const [showCancelDowngradeModal, setShowCancelDowngradeModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showDowngradeModal, setShowDowngradeModal] = useState(false);
@@ -368,6 +372,10 @@ function SubscriptionPageContent() {
     setShowCancelModal(true);
   };
 
+  const handleCancelDowngrade = async () => {
+    setShowCancelDowngradeModal(true);
+  };
+
   const confirmCancelSubscription = async () => {
     if (!dbSubscription) return;
     
@@ -401,8 +409,10 @@ function SubscriptionPageContent() {
   };
 
   const confirmUpgrade = async () => {
+    setIsProcessingUpgrade(true);
     setShowUpgradeModal(false);
     await executeCheckout(SubscribeTypes.UPGRADE);
+    setIsProcessingUpgrade(false);
     // Refresh subscription data
     if (user?.id) {
       await subscriptionService.loadUserSubscriptionData(user.id);
@@ -410,13 +420,28 @@ function SubscriptionPageContent() {
   };
 
   const confirmDowngrade = async () => {
+    setIsProcessingDowngrade(true);
     setShowDowngradeModal(false);
     await executeCheckout(SubscribeTypes.DOWNGRADE);
     // Refresh subscription data
+    setIsProcessingDowngrade(false);
     if (user?.id) {
       await subscriptionService.loadUserSubscriptionData(user.id);
     }
   };
+
+  const cancelDowngrade = async () => {
+    setShowCancelDowngradeModal(false);
+    setIsProcessingCancelDowngrade(true);
+    await paymentService.cancelDowngrade(dbSubscription?.paddleSubscriptionId);
+    setShowDowngradeModal(false);
+    if (user?.id) {
+      await subscriptionService.loadUserSubscriptionData(user.id);
+    }
+
+    showSuccess('Downgrade Canceled', 'Your subscription will remain on the Pro plan.');
+    setIsProcessingCancelDowngrade(false);
+  }
 
   const handlePlanChange = async (newPlan: 'Starter' | 'Pro') => {
     setIsProcessing(true);
@@ -727,12 +752,76 @@ function SubscriptionPageContent() {
       </div>
     );
   };
+  // Cancel Downgrade Confirmation Modal Component
+  const CancelDowngradeConfirmationModal = () => {
+    if (!showCancelDowngradeModal) return null;
+
+    const hasDowngraded = dbSubscription?.hasDowngraded;
+    const isActive = dbSubscription?.status === SubscriptionStatus.ACTIVE;
+
+    return (
+      <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
+        <div className="bg-background-secondary rounded-2xl max-w-md w-full mx-4 shadow-xl border border-secondary">
+          <div className="p-6">
+            {/* Icon */}
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center">
+                <svg className="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H3m4 4v-8" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Title */}
+            <h3 className="text-xl font-semibold text-text-primary text-center mb-2">
+              Cancel Downgrade to Starter Plan?
+            </h3>
+
+            {/* Description */}
+            <p className="text-secondary text-center mb-4 leading-relaxed">
+              You currently have a downgrade scheduled. Canceling will keep you on the Pro plan.
+            </p>
+
+            {/* Warning Details */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+              <h4 className="text-sm font-medium text-yellow-800 mb-2">What will happen:</h4>
+              <ul className="text-xs text-yellow-700 space-y-1">
+                <li>• You'll keep all Pro plan benefits</li>
+                <li>• Your AI chat messages will remain at 400 per month</li>
+                <li>• Your PDF uploads will remain at 500 per month</li>
+                <li>• You won't be charged for the Starter plan</li>
+              </ul>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => setShowCancelDowngradeModal(false)}
+                className="flex-1 bg-primary hover:bg-secondary text-text-primary font-semibold py-3 px-4 rounded-lg border border-secondary transition-colors duration-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={cancelDowngrade}
+                className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
+              >
+                Keep Pro Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
       <CancelConfirmationModal />
       <UpgradeConfirmationModal />
       <DowngradeConfirmationModal />
+      <CancelDowngradeConfirmationModal />
+      
+      {/* Main Subscription Management UI */}
       <div className="min-h-screen bg-primary">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
           {/* Header */}
@@ -801,6 +890,31 @@ function SubscriptionPageContent() {
                 </div>
               </div>
             )}
+            {(dbSubscription.hasDowngraded) && (
+              <div className="bg-red-400/10 border border-yellow-400/50 rounded-lg p-4 mb-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center mr-4">
+                    <svg className="h-5 w-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <div>
+                      <h4 className="text-yellow-400 font-medium">Subscription Set to Downgrade</h4>
+                      <p className="text-yellow-600 text-sm">
+                        Your subscription is set to downgrade to the <span className="font-semibold">Starter</span> plan on {new Date(dbSubscription.nextBillingAt).toLocaleDateString()}. 
+                        You'll continue to have access to {dbSubscription.plan?.name === PlanName.STARTER ? 'Starter' : dbSubscription.plan?.name === PlanName.PRO ? 'Pro' : 'Enterprise'} until then.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleCancelDowngrade}
+                    disabled={isProcessingDowngrade}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer flex-shrink-0"
+                  >
+                    {isProcessing ? 'Processing...' : 'Cancel Downgrade'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Usage Statistics */}
@@ -844,7 +958,7 @@ function SubscriptionPageContent() {
                   </button>
                 </div>
               )}
-              {dbSubscription?.plan?.name === 'pro' && (
+              {(dbSubscription?.plan?.name === 'pro' && !dbSubscription.hasDowngraded) && (
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
                   <div>
                     <h3 className="text-text-primary font-medium">Downgrade to Starter</h3>
@@ -854,14 +968,13 @@ function SubscriptionPageContent() {
                   </div>
                   <button
                     onClick={() => openCheckout(SubscribeTypes.DOWNGRADE)}
-                    disabled={isProcessing}
+                    disabled={isProcessingDowngrade}
                     className="mt-3 sm:mt-0 bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                   >
-                    {isProcessing ? 'Processing...' : 'Downgrade to Starter'}
+                    {isProcessingDowngrade ? 'Processing...' : 'Downgrade to Starter'}
                   </button>
                 </div>
               )}
-
               {dbSubscription.plan?.name === 'starter' && (
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
                   <div>
@@ -872,10 +985,10 @@ function SubscriptionPageContent() {
                   </div>
                   <button
                     onClick={() => openCheckout(SubscribeTypes.UPGRADE)}
-                    disabled={isProcessing}
+                    disabled={isProcessingUpgrade}
                     className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                   >
-                    {isProcessing ? 'Processing...' : 'Upgrade to Pro'}
+                    {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Pro'}
                   </button>
                 </div>
               )}
