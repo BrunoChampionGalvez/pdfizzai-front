@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import SubscriptionClientLayout from './SubscriptionClientLayout';
 
 export const metadata: Metadata = {
   title: 'Subscription - RefDoc AI',
@@ -10,5 +11,9 @@ export default function SubscriptionLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <SubscriptionClientLayout>
+      {children}
+    </SubscriptionClientLayout>
+  );
 }

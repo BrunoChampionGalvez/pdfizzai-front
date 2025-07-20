@@ -10,6 +10,8 @@ import { fileSystemService } from '../services/filesystem';
 import { subscriptionService } from '../services/subscription';
 import Tooltip from './Tooltip';
 import api from '../lib/api';
+import { get } from 'http';
+import { useToast } from './ToastProvider';
 
 interface FileUploaderProps {
   folderId?: string | null;
@@ -27,12 +29,22 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   const { user } = useAuthStore();
   const { triggerExtraction, handleShowFile } = usePDFViewer();
   const { setCurrentReference } = useChatStore();
-  
+  const { showError } = useToast();
+
   const targetFolderId = folderId !== undefined ? folderId : currentFolderId;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    if (files.length > getFilesRemaining()) {
+      showError('File upload limit reached', `You tried to upload ${files.length} files and only ${getFilesRemaining()} file upload${getFilesRemaining() === 1 ? '' : 's'} remain${getFilesRemaining() === 1 ? 's' : ''}, please upload fewer files or upgrade your plan.`);
+      // Clear the input value to allow trying again later
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
 
     // Check if user can upload files (hasn't exceeded limit)
     if (!subscriptionService.canUploadFiles()) {

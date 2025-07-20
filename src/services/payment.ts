@@ -1,4 +1,4 @@
-import { SubscriptionStatus } from '@/app/subscription/page';
+import { SubscriptionStatus } from '../types/subscription';
 import api from '../lib/api';
 
 interface PaddleSubscription {

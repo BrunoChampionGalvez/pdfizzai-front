@@ -14,7 +14,7 @@ export default function Sidebar() {
   const [newFolderName, setNewFolderName] = useState('');
   const { isSidebarCollapsed, setSidebarCollapsed } = useUIStore();
   const { currentFolderId, addFolder } = useFileSystemStore();
-  const { getFilesRemaining, hasExceededFileLimit } = useSubscriptionStore();
+  const { getFilesRemaining, hasExceededFileLimit, getCurrentFileLimit } = useSubscriptionStore();
 
   // Check if user has app access for enabling/disabling features
   const hasAppAccess = subscriptionService.hasAppAccess();
@@ -87,6 +87,23 @@ export default function Sidebar() {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* File count indicator */}
+          {hasAppAccess && getFilesRemaining() <= 10 && getFilesRemaining() > 0 && (
+            <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center">
+                <svg className="h-4 w-4 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.856-.833-2.598 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-yellow-800 font-medium text-sm">Low file count</p>
+                  <p className="text-yellow-700 text-xs">
+                    {getFilesRemaining()} of {getCurrentFileLimit()} uploads remaining.
+                  </p>
+                </div>
+              </div>
+            </div>
           )}
 
           <div className="space-y-3 p-3 rounded-lg shadow-sm bg-background-primary/10">

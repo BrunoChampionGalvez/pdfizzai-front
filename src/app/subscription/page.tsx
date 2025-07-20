@@ -6,22 +6,10 @@ import { useAuthStore } from '../../store/auth';
 import { useSubscriptionStore } from '../../store/subscription';
 import { subscriptionService } from '../../services/subscription';
 import { AuthToken, paymentService } from '../../services/payment';
-import { ToastProvider, useToast } from '../../components/ToastProvider';
+import { useToast } from '../../components/ToastProvider';
 import UsageBar from '../../components/UsageBar';
 import * as Paddle from '@paddle/paddle-js';
-import { PlanName } from '../pricing/page';
-
-enum SubscribeTypes {
-  REACTIVATE = 'reactivate',
-  UPGRADE = 'upgrade',
-  DOWNGRADE = 'downgrade'
-}
-
-export enum SubscriptionStatus {
-  ACTIVE = 'active',
-  CANCELED = 'canceled',
-  TRIALING = 'trialing'
-}
+import { PlanName, SubscribeTypes, SubscriptionStatus } from '../../types/subscription';
 
 interface SubscriptionData {
   id: string;
@@ -40,11 +28,7 @@ interface SubscriptionData {
 }
 
 export default function SubscriptionPage() {
-  return (
-    <ToastProvider>
-      <SubscriptionPageContent />
-    </ToastProvider>
-  );
+  return <SubscriptionPageContent />;
 }
 
 function SubscriptionPageContent() {
@@ -573,15 +557,15 @@ function SubscriptionPageContent() {
           <div className="p-6">
             {/* Icon */}
             <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-16 h-16 bg-primary rounded-full flex items-center justify-center">
+                <svg className="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               </div>
             </div>
 
             {/* Title */}
-            <h3 className="text-xl font-semibold text-text-primary text-center mb-2">
+            <h3 className="text-xl font-semibold text-text-accent text-center mb-2">
               Reactivate Your {planName} Plan?
             </h3>
 
@@ -594,11 +578,11 @@ function SubscriptionPageContent() {
             </p>
 
             {/* Benefits/Billing Information */}
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-              <h4 className="text-sm font-medium text-green-800 mb-2">
+            <div className="bg-primary border border-accent-100/50 rounded-lg p-4 mb-6">
+              <h4 className="text-sm font-medium text-accent mb-2">
                 {isScheduledCancel ? 'What will happen:' : 'Billing & Benefits:'}
               </h4>
-              <ul className="text-xs text-green-700 space-y-1">
+              <ul className="text-xs text-accent-100/40 space-y-1">
                 {isScheduledCancel ? (
                   <>
                     <li>• Your subscription will remain active and won't be canceled</li>
@@ -609,7 +593,7 @@ function SubscriptionPageContent() {
                   </>
                 ) : (
                   <>
-                    <li>• You'll be charged ${planPrice} for your {planName} plan immediately</li>
+                    <li>• You'll be charged ${planPrice} for your {planName} plan</li>
                     <li>• You'll regain immediate access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
                     <li>• You'll regain immediate access to {dbSubscription?.plan?.filesLimit || 0} PDF uploads per month</li>
                     <li>• You'll regain access to premium features and priority support</li>
@@ -630,7 +614,7 @@ function SubscriptionPageContent() {
               <button
                 onClick={confirmReactivate}
                 disabled={isProcessing}
-                className="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                className="flex-1 bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
               >
                 {isProcessing ? 'Reactivating...' : `Reactivate ${planName} Plan`}
               </button>
@@ -716,8 +700,8 @@ function SubscriptionPageContent() {
           <div className="p-6">
             {/* Icon */}
             <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-16 h-16 bg-primary border-2 border-accent-100/40 rounded-full flex items-center justify-center">
+                <svg className="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16l-4-4m0 0l4-4m-4 4h18m-4-4v8" />
                 </svg>
               </div>
@@ -737,9 +721,9 @@ function SubscriptionPageContent() {
             </p>
 
             {/* Billing Details */}
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-              <h4 className="text-sm font-medium text-green-800 mb-2">Billing Details:</h4>
-              <ul className="text-xs text-green-700 space-y-1">
+            <div className="bg-primary border border-accent-100/60 rounded-lg p-4 mb-6">
+              <h4 className="text-sm font-medium text-accent mb-2">Billing Details:</h4>
+              <ul className="text-xs text-accent-100/60 space-y-1">
                 {isScheduledCancel ? (
                   <>
                     <li>• You'll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
@@ -766,7 +750,7 @@ function SubscriptionPageContent() {
               </button>
               <button
                 onClick={confirmUpgrade}
-                className="flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
+                className="flex-1 bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
               >
                 Yes, Upgrade to Pro
               </button>
@@ -799,7 +783,7 @@ function SubscriptionPageContent() {
 
             {/* Title */}
             <h3 className="text-xl font-semibold text-text-primary text-center mb-2">
-              Downgrade to Starter Plan?
+              Downgrade to Starter plan?
             </h3>
 
             {/* Description */}
@@ -846,7 +830,7 @@ function SubscriptionPageContent() {
                 onClick={confirmDowngrade}
                 className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
               >
-                Yes, Downgrade to Starter
+                Yes, Downgrade
               </button>
             </div>
           </div>
@@ -1002,7 +986,7 @@ function SubscriptionPageContent() {
                     </svg>
                     <div>
                       <h4 className="text-yellow-400 font-medium">Subscription Set to Downgrade</h4>
-                      <p className="text-yellow-600 text-sm">
+                      <p className="text-yellow-500/60 text-sm">
                         Your subscription is set to downgrade to the <span className="font-semibold">Starter</span> plan on {new Date(dbSubscription.nextBillingAt).toLocaleDateString()}. 
                         You'll continue to have access to {dbSubscription.plan?.name === PlanName.STARTER ? 'Starter' : dbSubscription.plan?.name === PlanName.PRO ? 'Pro' : 'Enterprise'} until then.
                       </p>
@@ -1072,7 +1056,7 @@ function SubscriptionPageContent() {
                   <button
                     onClick={() => openCheckout(SubscribeTypes.DOWNGRADE)}
                     disabled={isProcessingDowngrade}
-                    className="mt-3 sm:mt-0 bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                    className="mt-3 sm:mt-0 bg-yellow-600 hover:bg-yellow-700 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                   >
                     {isProcessingDowngrade ? 'Processing...' : 'Downgrade to Starter'}
                   </button>

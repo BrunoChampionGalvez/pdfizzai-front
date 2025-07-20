@@ -610,7 +610,7 @@ export default function ChatPane() {
               )}
 
               {/* Message usage indicator for new session */}
-              {!hasExceededMessageLimit() && isSubscriptionActive() && getMessagesRemaining() <= 5 && (
+              {!hasExceededMessageLimit() && isSubscriptionActive() && getMessagesRemaining() <= 10 && (
                 <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <div className="flex items-center">
                     <svg className="h-4 w-4 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -619,7 +619,7 @@ export default function ChatPane() {
                     <div>
                       <p className="text-yellow-800 font-medium text-sm">Low message count</p>
                       <p className="text-yellow-700 text-xs">
-                        {getMessagesRemaining()} messages remaining.
+                        {getMessagesRemaining()} of {getCurrentMessageLimit()} messages remaining.
                       </p>
                     </div>
                   </div>

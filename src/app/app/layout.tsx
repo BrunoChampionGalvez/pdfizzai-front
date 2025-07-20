@@ -9,6 +9,7 @@ import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
 import ErrorBoundary from '../../components/ErrorBoundary';
 import { PDFViewerProvider } from '../../contexts/PDFViewerContext';
+import { ToastProvider } from '../../components/ToastProvider';
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading, user, setUser, setLoading } = useAuthStore();
@@ -60,18 +61,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-primary relative">
-      <Header />
-      <PDFViewerProvider>
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 overflow-auto">
-            <ErrorBoundary>
-              {children}
-            </ErrorBoundary>
-          </main>
-        </div>
-      </PDFViewerProvider>
-    </div>
+    <ToastProvider>
+      <div className="flex flex-col h-full bg-primary relative">
+        <Header />
+        <PDFViewerProvider>
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar />
+            <main className="flex-1 overflow-auto">
+              <ErrorBoundary>
+                {children}
+              </ErrorBoundary>
+            </main>
+          </div>
+        </PDFViewerProvider>
+      </div>
+    </ToastProvider>
   );
 }
