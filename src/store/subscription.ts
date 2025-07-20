@@ -105,7 +105,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const messageLimit = get().getCurrentMessageLimit();
     if (!subscriptionUsage) return messageLimit;
 
-    return Math.max(0, (messageLimit + (dbSubscription?.messagesLeftBeforeUpgrade || 0)) - subscriptionUsage.messagesUsed);
+    return Math.max(0, messageLimit - subscriptionUsage.messagesUsed);
   },
   
   // Get remaining files
@@ -114,7 +114,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
     const fileLimit = get().getCurrentFileLimit();
     if (!userFilesCount) return fileLimit;
 
-    return Math.max(0, (fileLimit + (dbSubscription?.filesLeftBeforeUpgrade || 0)) - userFilesCount.totalFiles);
+    return Math.max(0, fileLimit - userFilesCount.totalFiles);
   },
   
   // Get next billing date
