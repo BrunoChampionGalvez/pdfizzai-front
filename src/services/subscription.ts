@@ -11,7 +11,7 @@ export const subscriptionService = {
       setError, 
       setDbSubscription, 
       setSubscriptionUsage, 
-      setUserFilesCount 
+      setUserFilePagesCount 
     } = useSubscriptionStore.getState();
 
     try {
@@ -29,8 +29,8 @@ export const subscriptionService = {
       }
 
       // Fetch user's total files count
-      const filesCount = await paymentService.getUserFilesCount(userId);
-      setUserFilesCount(filesCount);
+      const filesCount = await paymentService.getUserFilePagesCount(userId);
+      setUserFilePagesCount(filesCount);
 
     } catch (error) {
       console.error('Error loading subscription data:', error);
@@ -45,12 +45,12 @@ export const subscriptionService = {
    * Refresh just the files count (useful after file upload/delete)
    */
   async refreshFilesCount(userId: string): Promise<void> {
-    const { setUserFilesCount } = useSubscriptionStore.getState();
+    const { setUserFilePagesCount } = useSubscriptionStore.getState();
 
     try {
-      // Fetch user's total files count
-      const filesCount = await paymentService.getUserFilesCount(userId);
-      setUserFilesCount(filesCount);
+      // Fetch user's total file pages count
+      const filePagesCount = await paymentService.getUserFilePagesCount(userId);
+      setUserFilePagesCount(filePagesCount);
     } catch (error) {
       console.error('Error refreshing files count:', error);
       // Don't throw - this is a nice-to-have refresh
@@ -119,10 +119,10 @@ export const subscriptionService = {
       isTrial: store.isTrialUser(),
       hasSubscription: !!store.dbSubscription,
       messagesRemaining: store.getMessagesRemaining(),
-      filesRemaining: store.getFilesRemaining(),
+      filesRemaining: store.getFilePagesRemaining(),
       nextBillingDate: store.getNextBillingDate(),
       currentMessageLimit: store.getCurrentMessageLimit(),
-      currentFileLimit: store.getCurrentFileLimit(),
+      currentFileLimit: store.getCurrentFilePagesLimit(),
     };
   },
 

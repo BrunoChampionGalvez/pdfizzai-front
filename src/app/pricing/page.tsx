@@ -337,7 +337,7 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    250 PDF uploads
+                    2000 PDF pages uploads
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -441,7 +441,7 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    500 PDF uploads
+                    5000 PDF pages uploads
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -534,7 +534,7 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    500 PDF uploads / user
+                    5000 PDF pages uploads / user
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -636,13 +636,13 @@ export default function PricingPage() {
                   <ul className="text-sm text-secondary space-y-1">
                     {selectedPlan.name === 'Starter' ? (
                       <>
-                        <li>• 250 PDF uploads</li>
+                        <li>• 2000 PDF pages uploads</li>
                         <li>• 200 AI chat messages</li>
                         <li>• Email support</li>
                       </>
                     ) : (
                       <>
-                        <li>• 500 PDF uploads</li>
+                        <li>• 5000 PDF pages uploads</li>
                         <li>• 400 AI chat messages</li>
                         <li>• Priority support</li>
                       </>

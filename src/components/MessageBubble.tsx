@@ -183,6 +183,8 @@ export default function MessageBubble({
   };
 
   const handleLoadReferenceAgain = async (referenceId: string, textSnippet: string) => {
+    console.log(`Loading reference again for ID: ${referenceId} with text: "${textSnippet}"`);
+    
     setLoadingRefAction(referenceId);
     
     try {

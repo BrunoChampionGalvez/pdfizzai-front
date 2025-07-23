@@ -125,10 +125,16 @@ export const chatService = {
                 console.log('[STREAMING] Yielding chunk:', parsedData.substring(0, 50) + '...');
                 yield parsedData;
               } catch (error) {
-                // If it's not JSON, treat as text chunk
+                // If it's not JSON, treat as text chunk and check for message ID markers
                 console.log('[STREAMING] Non-JSON chunk:', data.substring(0, 50) + '...');
-                streamedContent += data;
-                yield data;
+                
+                // Check for message ID markers and yield them separately
+                if (data.includes('[USER_MESSAGE_ID]') || data.includes('[AI_MESSAGE_ID]')) {
+                  yield data; // Yield the message ID data separately
+                } else {
+                  streamedContent += data;
+                  yield data;
+                }
               }
             }
           }
@@ -223,8 +229,8 @@ export const chatService = {
   },
 
   async loadReferenceAgain(referenceId: string, messageId: string, textToSearch: string, chatMessage: string): Promise<string> {
-    console.log('Inside searchReferenceAgain Service');
-    
+    console.log(`Inside loadReferenceAgain Service: ${referenceId}, ${messageId}, ${textToSearch}, ${chatMessage}`);
+
     const response = await api.post<string>(`/api/chat/load-reference-again/${messageId}`, {
       textToSearch,
       chatMessage,

@@ -1,21 +1,21 @@
 import { create } from 'zustand';
 import type { DbSubscription, SubscriptionUsage, SubscriptionPlan } from '../services/payment';
 
-export interface UserFilesCount {
-  totalFiles: number;
+export interface UserFilePagesCount {
+  totalFilePages: number;
 }
 
 interface SubscriptionState {
   dbSubscription: DbSubscription | null;
   subscriptionUsage: SubscriptionUsage | null;
-  userFilesCount: UserFilesCount | null;
+  userFilePagesCount: UserFilePagesCount | null;
   isLoading: boolean;
   error: string | null;
   
   // Actions
   setDbSubscription: (subscription: DbSubscription | null) => void;
   setSubscriptionUsage: (usage: SubscriptionUsage | null) => void;
-  setUserFilesCount: (count: UserFilesCount | null) => void;
+  setUserFilePagesCount: (count: UserFilePagesCount | null) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   
@@ -25,9 +25,9 @@ interface SubscriptionState {
   hasExceededMessageLimit: () => boolean;
   hasExceededFileLimit: () => boolean;
   getCurrentMessageLimit: () => number;
-  getCurrentFileLimit: () => number;
+  getCurrentFilePagesLimit: () => number;
   getMessagesRemaining: () => number;
-  getFilesRemaining: () => number;
+  getFilePagesRemaining: () => number;
   getNextBillingDate: () => Date | null;
   
   // Reset function
@@ -37,13 +37,13 @@ interface SubscriptionState {
 export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   dbSubscription: null,
   subscriptionUsage: null,
-  userFilesCount: null,
+  userFilePagesCount: null,
   isLoading: false,
   error: null,
   
   setDbSubscription: (subscription) => set({ dbSubscription: subscription }),
   setSubscriptionUsage: (usage) => set({ subscriptionUsage: usage }),
-  setUserFilesCount: (count) => set({ userFilesCount: count }),
+  setUserFilePagesCount: (count) => set({ userFilePagesCount: count }),
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
   
@@ -70,11 +70,11 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   
   // Check if user has exceeded file limit
   hasExceededFileLimit: () => {
-    const { userFilesCount, dbSubscription } = get();
-    if (!userFilesCount) return false; // If we don't know the count, allow uploads
-    
-    const fileLimit = get().getCurrentFileLimit(); // This now handles missing subscription/plan
-    return userFilesCount.totalFiles >= fileLimit + (dbSubscription?.filesLeftBeforeUpgrade || 0);
+    const { userFilePagesCount, dbSubscription } = get();
+    if (!userFilePagesCount) return false; // If we don't know the count, allow uploads
+
+    const filePagesLimit = get().getCurrentFilePagesLimit(); // This now handles missing subscription/plan
+    return userFilePagesCount.totalFilePages >= filePagesLimit + (dbSubscription?.filePagesLeftBeforeUpgrade || 0);
   },
   
   // Get current message limit based on trial status
@@ -89,14 +89,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   },
   
   // Get current file limit based on trial status
-  getCurrentFileLimit: () => {
+  getCurrentFilePagesLimit: () => {
     const { dbSubscription } = get();
     if (!dbSubscription?.plan) return 10; // Default limit for users without subscription
     
     const isTrialUser = get().isTrialUser();
     return isTrialUser 
-      ? dbSubscription.plan.trialFilesLimit 
-      : dbSubscription.plan.filesLimit + (dbSubscription?.filesLeftBeforeUpgrade || 0);
+      ? dbSubscription.plan.trialFilePagesLimit 
+      : dbSubscription.plan.filePagesLimit + (dbSubscription?.filePagesLeftBeforeUpgrade || 0);
   },
   
   // Get remaining messages
@@ -107,14 +107,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
     return Math.max(0, messageLimit - subscriptionUsage.messagesUsed);
   },
-  
-  // Get remaining files
-  getFilesRemaining: () => {
-    const { userFilesCount, dbSubscription } = get();
-    const fileLimit = get().getCurrentFileLimit();
-    if (!userFilesCount) return fileLimit;
 
-    return Math.max(0, fileLimit - userFilesCount.totalFiles);
+  // Get remaining file pages
+  getFilePagesRemaining: () => {
+    const { userFilePagesCount, dbSubscription } = get();
+    const filePagesLimit = get().getCurrentFilePagesLimit();
+    if (!userFilePagesCount) return filePagesLimit;
+
+    return Math.max(0, filePagesLimit - userFilePagesCount.totalFilePages);
   },
   
   // Get next billing date
@@ -135,7 +135,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   reset: () => set({
     dbSubscription: null,
     subscriptionUsage: null,
-    userFilesCount: null,
+    userFilePagesCount: null,
     isLoading: false,
     error: null,
   }),

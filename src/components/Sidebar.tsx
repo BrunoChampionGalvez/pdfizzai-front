@@ -14,7 +14,7 @@ export default function Sidebar() {
   const [newFolderName, setNewFolderName] = useState('');
   const { isSidebarCollapsed, setSidebarCollapsed } = useUIStore();
   const { currentFolderId, addFolder } = useFileSystemStore();
-  const { getFilesRemaining, hasExceededFileLimit, getCurrentFileLimit } = useSubscriptionStore();
+  const { getFilePagesRemaining, hasExceededFileLimit, getCurrentFilePagesLimit } = useSubscriptionStore();
 
   // Check if user has app access for enabling/disabling features
   const hasAppAccess = subscriptionService.hasAppAccess();
@@ -90,7 +90,7 @@ export default function Sidebar() {
           )}
 
           {/* File count indicator */}
-          {hasAppAccess && getFilesRemaining() <= 10 && getFilesRemaining() > 0 && (
+          {hasAppAccess && getFilePagesRemaining() <= 10 && getFilePagesRemaining() > 0 && (
             <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded-lg">
               <div className="flex items-center">
                 <svg className="h-4 w-4 text-yellow-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -99,7 +99,7 @@ export default function Sidebar() {
                 <div>
                   <p className="text-yellow-800 font-medium text-sm">Low file count</p>
                   <p className="text-yellow-700 text-xs">
-                    {getFilesRemaining()} of {getCurrentFileLimit()} uploads remaining.
+                    {getFilePagesRemaining()} of {getCurrentFilePagesLimit()} uploads remaining.
                   </p>
                 </div>
               </div>

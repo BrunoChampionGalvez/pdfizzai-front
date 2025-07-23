@@ -180,12 +180,15 @@ export const PdfViewerClient = ({
                                 console.log('Processing text snippets for highlighting');
                                 
                                 try {
+                                    // Replaces newlines with spaces, BUT only when NOT preceded by a hyphen
                                     const searchValue = textSnippet.replace(/(?<!-)[\r\n]+/g, ' ');
-                                    if (searchValue) {
+                                    // Removes whitespace (including newlines) that comes AFTER hyphens
+                                    const newSearchValue = searchValue.replace(/-\s+/g, '-');
+                                    // Removes hyphens that are NOT at the end of a line, but only if preceded by a number
+                                    const newerSearchValue = newSearchValue.replace(/(\d)-+/g, '$1');
+                                    if (newerSearchValue) {
                                         console.log('Searching for text');
-                                        UI.searchText(searchValue, {
-                                            wholeWord: true,
-                                        });
+                                        UI.searchText(newerSearchValue);
                                     }
                                 } catch (err) {
                                     console.error('Error processing text snippets:', err);
@@ -335,7 +338,10 @@ export const PdfViewerClient = ({
             try {
                 const response = await api.post(
                     `/api/files/${paperIdToExtract}/save-text`,
-                    { textByPages: extractedText },
+                    { 
+                        textByPages: extractedText,
+                        totalPages,
+                    },
                     { 
                         headers: { 'Content-Type': 'application/json' },
                         timeout: 30000 // 30 seconds timeout

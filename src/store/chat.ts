@@ -41,6 +41,7 @@ interface ChatState {
   addMessage: (message: ChatMessage) => void;
   updateMessage: (messageId: string, content: string) => void;
   updateMessageContent: (messageId: string, additionalContent: string) => void;
+  updateMessageId: (oldMessageId: string, newMessageId: string) => void;
   setSessions: (sessions: ChatSession[]) => void;
   addSession: (session: ChatSession) => void;
   setLoading: (loading: boolean) => void;
@@ -69,6 +70,11 @@ export const useChatStore = create<ChatState>((set) => ({
   updateMessageContent: (messageId, additionalContent) => set((state) => ({
     messages: state.messages.map(msg => 
       msg.id === messageId ? { ...msg, content: msg.content + additionalContent } : msg
+    )
+  })),
+  updateMessageId: (oldMessageId, newMessageId) => set((state) => ({
+    messages: state.messages.map(msg => 
+      msg.id === oldMessageId ? { ...msg, id: newMessageId } : msg
     )
   })),
   setSessions: (sessions) => set({ sessions }),

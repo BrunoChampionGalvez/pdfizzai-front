@@ -12,6 +12,7 @@ import Tooltip from './Tooltip';
 import api from '../lib/api';
 import { get } from 'http';
 import { useToast } from './ToastProvider';
+import { PDFDocument } from 'pdf-lib';
 
 interface FileUploaderProps {
   folderId?: string | null;
@@ -25,7 +26,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { currentFolderId, addFile } = useFileSystemStore();
-  const { hasExceededFileLimit, getFilesRemaining } = useSubscriptionStore();
+  const { hasExceededFileLimit, getFilePagesRemaining } = useSubscriptionStore();
   const { user } = useAuthStore();
   const { triggerExtraction, handleShowFile } = usePDFViewer();
   const { setCurrentReference } = useChatStore();
@@ -37,8 +38,23 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    if (files.length > getFilesRemaining()) {
-      showError('File upload limit reached', `You tried to upload ${files.length} files and only ${getFilesRemaining()} file upload${getFilesRemaining() === 1 ? '' : 's'} remain${getFilesRemaining() === 1 ? 's' : ''}, please upload fewer files or upgrade your plan.`);
+    let totalPages = 0;
+    for (let i = 0; i < files.length; i++) {
+      const arrayBuffer = await files[i].arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBuffer);
+      totalPages += pdfDoc.getPageCount();
+      if (totalPages > getFilePagesRemaining()) {
+        showError('Files exceed pages available', 'Please upload files with fewer pages.');
+        // Clear the input value to allow trying again later
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+    }
+
+    if (files.length > getFilePagesRemaining()) {
+      showError('File upload limit reached', `You tried to upload ${files.length} files and only ${getFilePagesRemaining()} file upload${getFilePagesRemaining() === 1 ? '' : 's'} remain${getFilePagesRemaining() === 1 ? 's' : ''}, please upload fewer files or upgrade your plan.`);
       // Clear the input value to allow trying again later
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -56,7 +72,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
     }
 
     // Check if uploading these files would exceed the limit
-    const filesRemaining = getFilesRemaining();
+    const filesRemaining = getFilePagesRemaining();
     if (files.length > filesRemaining) {
       // Clear the input value to allow trying again later
       if (fileInputRef.current) {
@@ -169,7 +185,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
           ref={fileInputRef}
           type="file"
           accept=".pdf"
-          multiple
+          //multiple
           className="hidden"
           onChange={handleFileChange}
           disabled={isUploading || hasExceededFileLimit() || disabled}
@@ -237,7 +253,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
         id={isIcon ? undefined : "file-upload"}
         type="file"
         accept=".pdf"
-        multiple
+        //multiple
         className="hidden"
         onChange={handleFileChange}
         disabled={isUploading || hasExceededFileLimit() || disabled}

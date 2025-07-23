@@ -31,6 +31,7 @@ export default function ChatPane() {
     currentReference,
     updateMessage,
     updateMessageContent,
+    updateMessageId,
     addSession
   } = useChatStore();
   const { isSidebarCollapsed } = useUIStore();
@@ -75,6 +76,7 @@ export default function ChatPane() {
         try {
           setLoading(true);
           const history = await chatService.getChatHistory(currentSessionId);
+          console.log('Loaded chat history for session:', currentSessionId, history);
           setMessages(history);
           setIsNewSession(false);
         } catch (error: unknown) {
@@ -400,7 +402,7 @@ export default function ChatPane() {
 
       const currentTime = new Date().toISOString();
       // Add user message immediately with cleaned content and selected materials
-      const userMessage = {
+      let userMessage = {
         id: generateId(),
         role: 'user' as const,
         content: cleanedMessage,
@@ -413,7 +415,7 @@ export default function ChatPane() {
       setMessage('');
 
       // Create AI message placeholder for streaming
-      const aiMessageId = generateId();
+      let aiMessageId = generateId();
       const aiMessage = {
         id: aiMessageId,
         role: 'model' as const,
@@ -449,7 +451,32 @@ export default function ChatPane() {
             folderIds,
             selectedMaterials
           )) {
-            // Only process if chunk has content
+            // Check for message ID updates first
+            if (chunk.includes('[USER_MESSAGE_ID]')) {
+              const userIdMatch = chunk.match(/\[USER_MESSAGE_ID\](.*?)\[\/USER_MESSAGE_ID\]/);
+              if (userIdMatch) {
+                const newUserId = userIdMatch[1];
+                console.log(`Updating user message ID from ${userMessage.id} to ${newUserId}`);
+                updateMessageId(userMessage.id, newUserId);
+                // Update our local reference too
+                userMessage.id = newUserId;
+              }
+              continue; // Don't add ID markers to content
+            }
+            
+            if (chunk.includes('[AI_MESSAGE_ID]')) {
+              const aiIdMatch = chunk.match(/\[AI_MESSAGE_ID\](.*?)\[\/AI_MESSAGE_ID\]/);
+              if (aiIdMatch) {
+                const newAiId = aiIdMatch[1];
+                console.log(`Updating AI message ID from ${aiMessageId} to ${newAiId}`);
+                updateMessageId(aiMessageId, newAiId);
+                // Update our local reference too
+                aiMessageId = newAiId;
+              }
+              continue; // Don't add ID markers to content
+            }
+            
+            // Only process if chunk has content and isn't a message ID marker
             if (chunk) {
               accumulatedContent += chunk;
               const now = Date.now();

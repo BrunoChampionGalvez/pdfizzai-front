@@ -15,7 +15,7 @@ export interface DbSubscription {
     hasFullAccess: boolean;
     nextBillingAt: Date;
     messagesLeftBeforeUpgrade: number;
-    filesLeftBeforeUpgrade: number;
+    filePagesLeftBeforeUpgrade: number;
     hasUpgraded: boolean;
     hasDowngraded: boolean;
     billingBeforeUpgrade: Date | null;
@@ -43,12 +43,12 @@ export interface SubscriptionPlan {
     id: string;
     name: string;
     messagesLimit: number;
-    filesLimit: number;
+    filePagesLimit: number;
     price: number;
     interval: string; // e.g., 'monthly', 'yearly'
     frequency: number; // e.g., 1 for monthly, 12 for yearly
     trialMessagesLimit: number;
-    trialFilesLimit: number;
+    trialFilePagesLimit: number;
     currency: string;
     createdAt: Date;
 }
@@ -114,9 +114,9 @@ export const paymentService = {
         }
     },
 
-    async getUserFilesCount(userId: string): Promise<{ totalFiles: number }> {
+    async getUserFilePagesCount(userId: string): Promise<{ totalFilePages: number }> {
         try {
-            const response = await api.get(`/api/payment/files-count/user/${userId}`);
+            const response = await api.get(`/api/payment/files-pages-count/user/${userId}`);
             return response.data;
         }
         catch (error) {

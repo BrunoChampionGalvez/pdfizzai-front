@@ -16,7 +16,7 @@ import api from '../lib/api';
 
 export default function FolderTree() {
   const { folders, files, currentFolderId, setCurrentFolderId, isLoading, addFolder, removeFolder, removeFile, addFile, setFiles } = useFileSystemStore();
-  const { hasExceededFileLimit, getFilesRemaining, getCurrentFileLimit } = useSubscriptionStore();
+  const { hasExceededFileLimit, getFilePagesRemaining, getCurrentFilePagesLimit } = useSubscriptionStore();
   const { user } = useAuthStore();
   
   // Check if user has app access for enabling/disabling features
@@ -766,7 +766,7 @@ export default function FolderTree() {
             <div>
               <p className="text-red-800 font-medium text-sm">File upload limit reached</p>
               <p className="text-red-700 text-xs">
-                You have used all {getCurrentFileLimit()} files allowed with your plan.
+                You have used all {getCurrentFilePagesLimit()} files allowed with your plan.
               </p>
             </div>
           </div>

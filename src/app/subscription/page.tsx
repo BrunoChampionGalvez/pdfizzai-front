@@ -37,15 +37,15 @@ function SubscriptionPageContent() {
   const { 
     dbSubscription, 
     subscriptionUsage, 
-    userFilesCount, 
+    userFilePagesCount, 
     isLoading, 
     error,
     isSubscriptionActive,
     isTrialUser,
     getCurrentMessageLimit,
-    getCurrentFileLimit,
+    getCurrentFilePagesLimit,
     getMessagesRemaining,
-    getFilesRemaining,
+    getFilePagesRemaining,
     getNextBillingDate
   } = useSubscriptionStore();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -587,7 +587,7 @@ function SubscriptionPageContent() {
                   <>
                     <li>• Your subscription will remain active and won't be canceled</li>
                     <li>• You'll keep access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                    <li>• You'll keep access to {dbSubscription?.plan?.filesLimit || 0} PDF uploads per month</li>
+                    <li>• You'll keep access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
                     <li>• You'll continue to be billed ${planPrice} per {dbSubscription?.interval || 'month'}</li>
                     <li>• No additional charges apply</li>
                   </>
@@ -595,7 +595,7 @@ function SubscriptionPageContent() {
                   <>
                     <li>• You'll be charged ${planPrice} for your {planName} plan</li>
                     <li>• You'll regain immediate access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                    <li>• You'll regain immediate access to {dbSubscription?.plan?.filesLimit || 0} PDF uploads per month</li>
+                    <li>• You'll regain immediate access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
                     <li>• You'll regain access to premium features and priority support</li>
                     <li>• Your billing cycle will resume normally</li>
                   </>
@@ -659,7 +659,7 @@ function SubscriptionPageContent() {
               <h4 className="text-sm font-medium text-text-primary mb-2">What will happen:</h4>
               <ul className="text-sm text-secondary space-y-1">
                 <li>• You will lose access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                <li>• You will lose access to {dbSubscription?.plan?.filesLimit || 0} PDF uploads per month</li>
+                <li>• You will lose access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
                 <li>• You will lose access to premium features and priority support</li>
                 <li>• If you have a downgrade scheduled to a lower plan, it will be canceled and you won't be charged when the cancellation takes effect.</li>
               </ul>
@@ -802,7 +802,7 @@ function SubscriptionPageContent() {
                   <>
                     <li>• You'll lose Pro plan benefits when your next billing period starts on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
                     <li>• Your AI chat messages will be limited to 200 per month (currently 400)</li>
-                    <li>• Your PDF uploads will be limited to 250 per month (currently 500)</li>
+                    <li>• Your PDF pages uploads will be limited to 2000 per month (currently 5000)</li>
                     <li>• You'll lose priority support</li>
                     <li>• Starting next billing cycle, you'll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
                   </>
@@ -810,7 +810,7 @@ function SubscriptionPageContent() {
                   <>
                     <li>• You'll lose Pro plan benefits at your next billing period on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
                     <li>• Your AI chat messages will be limited to 200 per month (currently 400)</li>
-                    <li>• Your PDF uploads will be limited to 250 per month (currently 500)</li>
+                    <li>• Your PDF pages uploads will be limited to 2000 per month (currently 5000)</li>
                     <li>• You'll lose priority support</li>
                     <li>• Starting next billing cycle, you'll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
                   </>
@@ -874,7 +874,7 @@ function SubscriptionPageContent() {
               <ul className="text-xs text-yellow-500/70 space-y-1">
                 <li>• You'll keep all Pro plan benefits</li>
                 <li>• Your AI chat messages will remain at 400 per month</li>
-                <li>• Your PDF uploads will remain at 500 per month</li>
+                <li>• Your PDF pages uploads will remain at 5000 per month</li>
                 <li>• You won't be charged for the Starter plan</li>
               </ul>
             </div>
@@ -1015,9 +1015,9 @@ function SubscriptionPageContent() {
                 limit={(dbSubscription.plan?.messagesLimit || 0) + (dbSubscription.messagesLeftBeforeUpgrade || 0)}
               />
               <UsageBar
-                label="PDF Uploads"
-                used={userFilesCount?.totalFiles || 0}
-                limit={(dbSubscription.plan?.filesLimit || 0) + (dbSubscription.filesLeftBeforeUpgrade || 0)}
+                label="PDF Pages Uploads"
+                used={userFilePagesCount?.totalFilePages || 0}
+                limit={(dbSubscription.plan?.filePagesLimit || 0) + (dbSubscription.filePagesLeftBeforeUpgrade || 0)}
               />
             </div>
           </div>
@@ -1165,13 +1165,13 @@ function SubscriptionPageContent() {
                     <ul className="text-sm text-secondary space-y-1">
                       {selectedPlan.name === 'starter' ? (
                         <>
-                          <li>• 250 PDF uploads</li>
+                          <li>• 2000 PDF pages uploads</li>
                           <li>• 200 AI chat messages</li>
                           <li>• Email support</li>
                         </>
                       ) : (
                         <>
-                          <li>• 500 PDF uploads</li>
+                          <li>• 5000 PDF pages uploads</li>
                           <li>• 400 AI chat messages</li>
                           <li>• Priority support</li>
                         </>
