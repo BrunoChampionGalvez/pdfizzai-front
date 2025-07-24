@@ -227,7 +227,7 @@ export default function MessageBubble({
                   <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2"></div>
                   <span>Loading...</span>
                 </div>
-              ) : (isSidePanelMode ? 'Show File' : 'Show')}
+              ) : 'Show File'}
             </button>
             
             <button 
@@ -240,7 +240,7 @@ export default function MessageBubble({
                   <div className="w-4 h-4 border-2 border-text-primary border-t-transparent rounded-full animate-spin mr-2"></div>
                   <span>Loading...</span>
                 </div>
-              ) : (isSidePanelMode ? 'Load Reference Again' : 'Reload')}
+              ) : 'Reload'}
             </button>
           </div>
         </div>
