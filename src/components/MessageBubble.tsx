@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useChatStore } from '../store/chat';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { formatTime } from '../lib/utils';
@@ -46,6 +46,7 @@ export default function MessageBubble({
   const [filePaths, setFilePaths] = useState<Record<string, string>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, boolean>>({});
   const [content, setContent] = useState<string>(firstContent || '');
+  const processedIdsRef = useRef<Set<string>>(new Set());
 
   // Update content when firstContent prop changes (for streaming updates)
   useEffect(() => {
@@ -112,46 +113,61 @@ export default function MessageBubble({
   
   // Load file paths for references when new reference IDs are found
   useEffect(() => {
-    const newReferenceIds = referenceIds.filter(id => !filePaths[id] && !loadingPaths[id]);
-    
-    if (newReferenceIds.length === 0) return;
-    
-    // Mark IDs as loading
-    const newLoadingPaths = { ...loadingPaths };
-    newReferenceIds.forEach(id => {
-      newLoadingPaths[id] = true;
-    });
-    setLoadingPaths(newLoadingPaths);
-    
-    // Load paths for all new reference IDs
-    Promise.all(
-      newReferenceIds.map(async (id) => {
-        try {
-          const path = await chatService.getFilePath(id);
-          return { id, path };
-        } catch (error) {
-          console.error(`Error loading path for ${id}:`, error);
-          return { id, path: '[Error loading path]' };
+    // Debounce the reference loading to avoid too many API calls during streaming
+    const timer = setTimeout(() => {
+      const newReferenceIds = referenceIds.filter(id => 
+        !filePaths[id] && 
+        !loadingPaths[id] && 
+        !processedIdsRef.current.has(id)
+      );
+      
+      if (newReferenceIds.length === 0) return;
+      
+      // Mark IDs as processed and loading
+      newReferenceIds.forEach(id => {
+        processedIdsRef.current.add(id);
+      });
+      
+      const newLoadingPaths = { ...loadingPaths };
+      newReferenceIds.forEach(id => {
+        newLoadingPaths[id] = true;
+      });
+      setLoadingPaths(newLoadingPaths);
+      
+      // Load paths for all new reference IDs sequentially to avoid too many simultaneous requests
+      (async () => {
+        const results: Array<{ id: string; path: string }> = [];
+        for (const id of newReferenceIds) {
+          try {
+            const path = await chatService.getFilePath(id);
+            results.push({ id, path });
+          } catch (error) {
+            console.error(`Error loading path for ${id}:`, error);
+            results.push({ id, path: '[Error loading path]' });
+          }
         }
-      })
-    ).then(results => {
-      setFilePaths(prev => {
+
+        setFilePaths(prev => {
         const newFilePaths = { ...prev };
         results.forEach(({ id, path }) => {
           newFilePaths[id] = path;
         });
         return newFilePaths;
-      });
-      
-      setLoadingPaths(prev => {
+        });
+
+        setLoadingPaths(prev => {
         const newLoadingPathsUpdate = { ...prev };
         results.forEach(({ id }) => {
           newLoadingPathsUpdate[id] = false;
         });
         return newLoadingPathsUpdate;
-      });
-    });
-  }, [referenceIds, filePaths, loadingPaths]); // Depend on the memoized referenceIds
+        });
+      })();
+    }, 300); // 300ms debounce
+    
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [referenceIds]); // Only depend on referenceIds, not the state we're updating to avoid infinite loops
   
   const handleReferenceClick = async (reference: ChatReference) => {
     // Set the current reference in the chat store for layout management
