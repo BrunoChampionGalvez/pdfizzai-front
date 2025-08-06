@@ -14,7 +14,7 @@ export function isApiErrorResponse(error: unknown): error is ApiErrorResponse {
     typeof error === 'object' && 
     error !== null &&
     'message' in error && 
-    typeof (error as any).message === 'string'
+    typeof (error as { message: unknown }).message === 'string'
   );
 }
 
@@ -24,13 +24,13 @@ export function isError(error: unknown): error is Error {
 }
 
 // Type guard to check if an object has response property with data
-export function hasErrorResponse(error: unknown): error is { response: { data?: any, status?: number } } {
+export function hasErrorResponse(error: unknown): error is { response: { data?: unknown, status?: number } } {
   return (
     typeof error === 'object' && 
     error !== null && 
     'response' in error && 
-    typeof (error as any).response === 'object' &&
-    (error as any).response !== null
+    typeof (error as { response: unknown }).response === 'object' &&
+    (error as { response: unknown }).response !== null
   );
 }
 
@@ -48,7 +48,7 @@ export function extractErrorMessage(error: unknown): string {
 
   // Handle Axios-like errors with response.data
   if (hasErrorResponse(error)) {
-    const responseData = (error as any).response.data;
+    const responseData = error.response.data;
     if (isApiErrorResponse(responseData)) {
       return responseData.message;
     }
@@ -56,7 +56,7 @@ export function extractErrorMessage(error: unknown): string {
       return responseData;
     }
     // If response has status code, include it in the message
-    const status = (error as any).response.status;
+    const status = error.response.status;
     if (status) {
       return `Error ${status}: Request failed`;
     }
@@ -74,7 +74,7 @@ export function extractErrorMessage(error: unknown): string {
 // Check if the error is an authentication error
 export function isAuthError(error: unknown): boolean {
   // Check for status code 401
-  if (hasErrorResponse(error) && (error as any).response.status === 401) {
+  if (hasErrorResponse(error) && error.response.status === 401) {
     return true;
   }
 

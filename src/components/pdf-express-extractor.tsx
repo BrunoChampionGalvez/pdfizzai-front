@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import WebViewer from '@pdftron/pdfjs-express-viewer';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import WebViewer, { WebViewerInstance } from '@pdftron/pdfjs-express-viewer';
 import api from '@/lib/api';
 import PDFViewerManager from '@/lib/pdf-viewer-manager';
 
@@ -36,13 +36,143 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
-  const instanceRef = useRef<any>(null);
+  const instanceRef = useRef<WebViewerInstance | null>(null);
   const uniqueIdRef = useRef(`pdf-extractor-${fileId}-${Date.now()}`);
   const extractionStatusRef = useRef<'not-started' | 'in-progress' | 'completed' | 'failed'>('not-started');
   const hasAttemptedInitRef = useRef(false);
   const extractionAttemptedRef = useRef(false);
   const mountedRef = useRef<boolean>(true);
   const initializingRef = useRef<boolean>(false);
+
+  // Function to extract text
+  const extractText = useCallback(async (instance: WebViewerInstance) => {
+    if (isExtracting) {
+      console.log('[PDF Extractor] Already extracting text, skipping duplicate call');
+      return;
+    }
+    
+    // Check if extraction was already completed for this file
+    if (completedExtractions.has(fileId)) {
+      console.log(`[PDF Extractor] Text extraction already completed for ${fileId}, skipping`);
+      extractionStatusRef.current = 'completed';
+      
+      // Clean up from active extractions if needed
+      if (activeExtractions.has(fileId)) {
+        activeExtractions.delete(fileId);
+      }
+      
+      onExtractionComplete(true);
+      return;
+    }
+    
+    setIsExtracting(true);
+    console.log('[PDF Extractor] Starting text extraction for', fileId);
+    
+    try {
+      // Wait for document to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const documentViewer = instance.Core.documentViewer;
+      const totalPages = await documentViewer.getPageCount();
+      
+      if (totalPages === 0) {
+        console.error('[PDF Extractor] No pages found in document');
+        setIsExtracting(false);
+        extractionStatusRef.current = 'failed';
+        activeExtractions.delete(fileId);
+        onExtractionComplete(false);
+        return;
+      }
+      
+      console.log(`[PDF Extractor] Beginning extraction of ${totalPages} pages`);
+      
+      const doc = await documentViewer.getDocument();
+      const batchSize = 10;
+      const batches = Math.ceil(totalPages / batchSize);
+      let extractedText: string = '';
+      
+      for (let batch = 0; batch < batches; batch++) {
+        const startPage = batch * batchSize + 1;
+        const endPage = Math.min((batch + 1) * batchSize, totalPages);
+        
+        for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+          try {
+            const text = await doc.getPageText(pageNum);
+            extractedText += `[START_PAGE]${text}[END_PAGE]`;
+
+            console.log(`[PDF Extractor] Extracted text from page ${pageNum}: ${text?.substring(0, 100)}...`);
+            
+            // Update progress
+            const progress = Math.round((pageNum / totalPages) * 100);
+            onExtractionProgress?.(progress);
+          } catch (error) {
+            console.error(`[PDF Extractor] Error extracting page ${pageNum}:`, error);
+            extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
+          }
+        }
+      }
+      
+      // Send extracted text to API
+      try {
+        console.log(`[PDF Extractor] Sending extracted text to API for file ${fileId}`);
+        console.log(`[PDF Extractor] Extracted text length: ${extractedText.length} characters`);
+        
+        const apiUrl = `/api/files/${fileId}/save-text`;
+        console.log(`[PDF Extractor] API endpoint: ${apiUrl}`);
+        console.log(`[PDF Extractor] Payload text length:`, extractedText.length);
+        
+        const response = await api.post(
+          apiUrl,
+          { textByPages: extractedText },
+          { 
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+          }
+        );
+        
+        console.log('[PDF Extractor] Text saved successfully:', response.data);
+        extractionStatusRef.current = 'completed';
+        completedExtractions.add(fileId); // Mark as completed globally
+        activeExtractions.delete(fileId);
+        
+        // Clear from active extraction
+        PDFViewerManager.setActiveExtraction(null);
+        
+        // Add a slight delay to ensure backend processing completes
+        setTimeout(() => {
+          onExtractionComplete(true);
+        }, 500);
+      } catch (apiError: unknown) {
+        console.error('[PDF Extractor] API error saving text:', apiError);
+        const errorObj = apiError as { response?: { status: number; data: unknown }; request?: unknown; message?: string };
+        const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown error';
+        
+        if (errorObj?.response) {
+          console.error('[PDF Extractor] API error response:', errorObj.response.status, errorObj.response.data);
+        } else if (errorObj?.request) {
+          console.error('[PDF Extractor] API error request:', errorObj.request);
+        } else {
+          console.error('[PDF Extractor] API error message:', errorObj?.message);
+        }
+        
+        setError(`Failed to send extracted text to API: ${errorMessage}`);
+        extractionStatusRef.current = 'failed';
+        activeExtractions.delete(fileId);
+        // Clear from active extraction on error
+        PDFViewerManager.setActiveExtraction(null);
+        onExtractionComplete(false);
+      }
+    } catch (error) {
+      console.error('[PDF Extractor] Error during extraction:', error);
+      extractionStatusRef.current = 'failed';
+      activeExtractions.delete(fileId);
+      // Clear from active extraction on any error
+      PDFViewerManager.setActiveExtraction(null);
+      onExtractionComplete(false);
+    } finally {
+      setIsExtracting(false);
+    }
+  }, [isExtracting, fileId, onExtractionComplete, onExtractionProgress]);
 
   // Reset the global state for this file when the component mounts
   useEffect(() => {
@@ -80,6 +210,9 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
   
   // Initialize the viewer once
   useEffect(() => {
+    // Capture the current viewer element reference at the start of the effect
+    const currentViewerElement = viewerRef.current;
+    
     if (hasAttemptedInitRef.current || initializingRef.current) {
       console.log(`[PDF Extractor] Already attempted initialization for ${fileId}, skipping`);
       return;
@@ -116,7 +249,7 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
       PDFViewerManager.setActiveExtraction(instanceId);
       
       // Check if DOM element is available
-      if (!viewerRef.current || !mountedRef.current) {
+      if (!currentViewerElement || !mountedRef.current) {
         console.log('[PDF Extractor] Viewer ref not available yet or component unmounted');
         PDFViewerManager.unregisterViewer(instanceId);
         PDFViewerManager.setActiveExtraction(null);
@@ -131,12 +264,12 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
       
       try {
         // Clear existing content and prepare new container
-        viewerRef.current.innerHTML = '';
+        currentViewerElement.innerHTML = '';
         const container = document.createElement('div');
         container.id = `container-${instanceId}`;
         container.style.width = '100%';
         container.style.height = '100%';
-        viewerRef.current.appendChild(container);
+        currentViewerElement.appendChild(container);
         
         // Initialize WebViewer
         if (isInitialized || instanceRef.current) {
@@ -156,7 +289,7 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
             path: '/webviewer/lib',
             initialDoc: fileUrl, // Use direct URL instead of proxy
             extension: 'pdf',
-            licenseKey: 'w8JCA73N5p1Calk1TAl1',
+            licenseKey: process.env.NEXT_PUBLIC_PDFJS_EXPRESS_KEY,
             disabledElements: [
               'leftPanelButton',
               'searchButton',
@@ -215,9 +348,10 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
             }
           });
           
-          instance.Core.documentViewer.addEventListener('documentLoadingFailed', (err: any) => {
+          instance.Core.documentViewer.addEventListener('documentLoadingFailed', (err: unknown) => {
             console.error('[PDF Extractor] Document loading failed:', err);
-            setError(`Failed to load PDF: ${err?.message || 'Unknown error'}`);
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            setError(`Failed to load PDF: ${errorMessage}`);
             extractionStatusRef.current = 'failed';
             if (activeExtractions.has(fileId)) {
               activeExtractions.delete(fileId);
@@ -267,6 +401,7 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
     
     // Cleanup function
     return () => {
+      
       if (instanceRef.current) {
         try {
           console.log('[PDF Extractor] Cleaning up WebViewer instance');
@@ -295,137 +430,12 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
       activeInstances.delete(instanceId);
       console.log(`[PDF Extractor] Removed instance ${instanceId} from active instances`);
 
-      // Clear the viewer element
-      if (viewerRef.current) {
-        viewerRef.current.innerHTML = '';
+      // Clear the viewer element using captured reference
+      if (currentViewerElement) {
+        currentViewerElement.innerHTML = '';
       }
     };
-  }, [fileId, fileUrl, isInitialized, onExtractionComplete]);
-  
-  // Function to extract text
-  const extractText = async (instance: any) => {
-    if (isExtracting) {
-      console.log('[PDF Extractor] Already extracting text, skipping duplicate call');
-      return;
-    }
-    
-    // Check if extraction was already completed for this file
-    if (completedExtractions.has(fileId)) {
-      console.log(`[PDF Extractor] Text extraction already completed for ${fileId}, skipping`);
-      extractionStatusRef.current = 'completed';
-      
-      // Clean up from active extractions if needed
-      if (activeExtractions.has(fileId)) {
-        activeExtractions.delete(fileId);
-      }
-      
-      onExtractionComplete(true);
-      return;
-    }
-    
-    setIsExtracting(true);
-    console.log('[PDF Extractor] Starting text extraction for', fileId);
-    
-    try {
-      // Wait for document to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const documentViewer = instance.Core.documentViewer;
-      const totalPages = await documentViewer.getPageCount();
-      
-      if (totalPages === 0) {
-        console.error('[PDF Extractor] No pages found in document');
-        setIsExtracting(false);
-        extractionStatusRef.current = 'failed';
-        activeExtractions.delete(fileId);
-        onExtractionComplete(false);
-        return;
-      }
-      
-      console.log(`[PDF Extractor] Beginning extraction of ${totalPages} pages`);
-      
-      const doc = await documentViewer.getDocument();
-      const batchSize = 10;
-      const batches = Math.ceil(totalPages / batchSize);
-      let extractedText: string = '';
-      
-      for (let batch = 0; batch < batches; batch++) {
-        const startPage = batch * batchSize + 1;
-        const endPage = Math.min((batch + 1) * batchSize, totalPages);
-        
-        for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-          try {
-            const text = await doc.loadPageText(pageNum);
-            extractedText += `[START_PAGE]${text}[END_PAGE]`;
-
-            console.log(`[PDF Extractor] Extracted text from page ${pageNum}: ${text?.substring(0, 100)}...`);
-            
-            // Update progress
-            const progress = Math.round((pageNum / totalPages) * 100);
-            onExtractionProgress?.(progress);
-          } catch (error) {
-            console.error(`[PDF Extractor] Error extracting page ${pageNum}:`, error);
-            extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
-          }
-        }
-      }
-      
-      // Send extracted text to API
-      try {
-        console.log(`[PDF Extractor] Sending extracted text to API for file ${fileId}`);
-        console.log(`[PDF Extractor] Extracted text length: ${extractedText.length} characters`);
-        
-        const apiUrl = `/api/files/${fileId}/save-text`;
-        console.log(`[PDF Extractor] API endpoint: ${apiUrl}`);
-        console.log(`[PDF Extractor] Payload text length:`, extractedText.length);
-        
-        const response = await api.post(
-          apiUrl,
-          { textByPages: extractedText },
-          { 
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-          }
-        );
-        
-        console.log('[PDF Extractor] Text saved successfully:', response.data);
-        extractionStatusRef.current = 'completed';
-        completedExtractions.add(fileId); // Mark as completed globally
-        activeExtractions.delete(fileId);
-        
-        // Clear from active extraction
-        PDFViewerManager.setActiveExtraction(null);
-        
-        // Add a slight delay to ensure backend processing completes
-        setTimeout(() => {
-          onExtractionComplete(true);
-        }, 500);
-      } catch (apiError: any) {
-        console.error('[PDF Extractor] API error saving text:', apiError);
-        if (apiError.response) {
-          console.error('[PDF Extractor] API error response:', apiError.response.status, apiError.response.data);
-        } else if (apiError.request) {
-          console.error('[PDF Extractor] API error request:', apiError.request);
-        } else {
-          console.error('[PDF Extractor] API error message:', apiError.message);
-        }
-        extractionStatusRef.current = 'failed';
-        activeExtractions.delete(fileId);
-        // Clear from active extraction on error
-        PDFViewerManager.setActiveExtraction(null);
-        onExtractionComplete(false);
-      }
-    } catch (error) {
-      console.error('[PDF Extractor] Error during extraction:', error);
-      extractionStatusRef.current = 'failed';
-      activeExtractions.delete(fileId);
-      // Clear from active extraction on any error
-      PDFViewerManager.setActiveExtraction(null);
-      onExtractionComplete(false);
-    } finally {
-      setIsExtracting(false);
-    }
-  };
+  }, [fileId, fileUrl, isInitialized, onExtractionComplete, extractText]);
   
   return (
     <div className="pdf-extractor" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

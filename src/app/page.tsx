@@ -17,11 +17,8 @@ export default function Home() {
   useEffect(() => {
     const initializePaddleFunction = async () => {
     // Initialize Paddle on client side
-      const paddle = await initializePaddle({
-        token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
-        pwCustomer: {
-          id: 'ctm_01gt25aq4b2zcfw12szwtjrbdt' // replace with a customer Paddle ID
-        }
+      await initializePaddle({
+        token: process.env.NEXT_PUBLIC_PADDLE_KEY as string, // replace with a client-side token
       });
     }
     initializePaddleFunction();
@@ -38,11 +35,11 @@ export default function Home() {
         if (currentUser?.id) {
           try {
             await subscriptionService.loadUserSubscriptionData(currentUser.id);
-          } catch (error) {
-            console.error('Failed to load subscription data:', error);
+          } catch (err) {
+            console.error('Failed to load subscription data:', err);
           }
         }
-      } catch (error) {
+      } catch {
         // User not authenticated, which is fine for landing page
         setUser(null);
       } finally {

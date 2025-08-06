@@ -1,6 +1,6 @@
 'use client'; // Client-side only component for PDFjs Express
 
-import WebViewer from '@pdftron/pdfjs-express-viewer';
+import WebViewer, { WebViewerInstance } from '@pdftron/pdfjs-express-viewer';
 import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import api from '@/lib/api';
 import PDFViewerManager from '@/lib/pdf-viewer-manager';
@@ -24,9 +24,8 @@ export const PdfViewerClient = ({
 }: PdfViewerClientProps) => {
     const viewer = useRef<HTMLDivElement>(null);
     const [error, setError] = useState<string | null>(null);
-    const instanceRef = useRef<any>(null);
+    const instanceRef = useRef<WebViewerInstance | null>(null);
     const [isExtracting, setIsExtracting] = useState(false);
-    const [extractionProgress, setExtractionProgress] = useState(0);
     const [isInitialized, setIsInitialized] = useState(false);
     const uniqueId = useId(); // Generate a truly unique ID for this instance
     const elementId = useRef(`webviewer-${paperId || 'doc'}-${uniqueId}-${Date.now()}`); // Add timestamp for extra uniqueness
@@ -58,6 +57,104 @@ export const PdfViewerClient = ({
         
         setIsInitialized(false);
     }, []);
+
+    // Function to extract text with batching
+    const extractTextFromPdf = useCallback(async (instance: WebViewerInstance, paperIdToExtract: string) => {
+        if (isExtracting) {
+            console.log('Already extracting text, skipping duplicate call');
+            return;
+        }
+        
+        try {
+            setIsExtracting(true);
+            
+            console.log('Starting text extraction for document');
+            const documentViewer = instance.Core.documentViewer;
+            const totalPages = await documentViewer.getPageCount();
+            console.log(`Found ${totalPages} pages for extraction`);
+            
+            if (totalPages === 0) {
+                console.error('No pages found in document');
+                setIsExtracting(false);
+                onTextExtractionComplete?.(false);
+                return;
+            }
+            
+            const doc = await documentViewer.getDocument();
+            const batchSize = 10; // Process 10 pages at a time
+            const batches = Math.ceil(totalPages / batchSize);
+            let extractedText: string = '';
+            
+            for (let batch = 0; batch < batches; batch++) {
+                // Calculate page range for this batch (1-indexed for PDF.js Express)
+                const startPage = batch * batchSize + 1;
+                const endPage = Math.min((batch + 1) * batchSize, totalPages);
+                console.log(`Processing batch ${batch + 1}/${batches}: pages ${startPage}-${endPage}`);
+                
+                // Extract text for each page in batch
+                for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+                    try {
+                        const text = await doc.getPageText(pageNum);
+                        extractedText += `[START_PAGE]${text}[END_PAGE]`;
+                    } catch (error) {
+                        console.error(`Error extracting text from page ${pageNum}, retrying...`, error);
+                        
+                        // Retry once with delay
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        
+                        try {
+                            const text = await doc.getPageText(pageNum);
+                            extractedText += `[START_PAGE]${text}[END_PAGE]`;
+                        } catch (retryError) {
+                            console.error(`Failed to extract text from page ${pageNum} after retry`, retryError);
+                            extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
+                        }
+                    }
+                    
+                    // Update progress
+                    const progress = Math.round(((batch * batchSize) + (pageNum - startPage + 1)) / totalPages * 100);
+                    onTextExtractionProgress?.(progress);
+                }
+            }
+            
+            // Send extracted text to backend
+            console.log('Sending extracted text to backend');
+            
+            try {
+                const response = await api.post(
+                    `/api/files/${paperIdToExtract}/save-text`,
+                    { 
+                        textByPages: extractedText,
+                        totalPages,
+                    },
+                    { 
+                        headers: { 'Content-Type': 'application/json' },
+                        timeout: 30000 // 30 seconds timeout
+                    }
+                );
+                
+                console.log('Text extraction complete:', response);
+                
+                // Clear the active extraction
+                PDFViewerManager.setActiveExtraction(null);
+                
+                onTextExtractionComplete?.(true);
+            } catch (apiError) {
+                console.error('API error saving extracted text:', apiError);
+                onTextExtractionComplete?.(false);
+                
+                // Clear the active extraction on error too
+                PDFViewerManager.setActiveExtraction(null);
+            }
+        } catch (error) {
+            console.error('Error in text extraction process:', error);
+            setIsExtracting(false);
+            onTextExtractionComplete?.(false);
+            
+            // Clear the active extraction on any error
+            PDFViewerManager.setActiveExtraction(null);
+        }
+    }, [isExtracting, onTextExtractionComplete, onTextExtractionProgress]);
 
     useEffect(() => {
         // Set mounted flag for tracking component lifecycle
@@ -132,7 +229,7 @@ export const PdfViewerClient = ({
                             path: '/webviewer/lib',
                             initialDoc: pdfUrl,
                             extension: 'pdf',
-                            licenseKey: 'w8JCA73N5p1Calk1TAl1',
+                            licenseKey: process.env.NEXT_PUBLIC_PDFJS_EXPRESS_KEY,
                             disabledElements: shouldExtractText ? [
                                 'leftPanelButton',
                                 'searchButton', 
@@ -219,22 +316,25 @@ export const PdfViewerClient = ({
                         });
         
                         // Event listener for page number updates
-                        Core.documentViewer.addEventListener('pageNumberUpdated', (pageNumber: number) => {
+                        Core.documentViewer.addEventListener('pageNumberUpdated', (data?: unknown) => {
+                            const pageNumber = (typeof data === 'number' ? data : 1);
                             console.log(`Page number is: ${pageNumber}`);
                         });
                         
                         // Handle errors
-                        instance.Core.documentViewer.addEventListener('documentLoadingFailed', (err: any) => {
+                        instance.Core.documentViewer.addEventListener('documentLoadingFailed', (err: unknown) => {
                             console.error('Document loading failed:', err);
-                            setError(`Failed to load PDF: ${err?.message || 'Please check if the URL is correct.'}`);
+                            const errorMessage = err instanceof Error ? err.message : 'Please check if the URL is correct.';
+                            setError(`Failed to load PDF: ${errorMessage}`);
                         });
         
                         // Release the initialization lock now that we're done
                         PDFViewerManager.releaseInitializationLock();
-                    }).catch((err: any) => {
+                    }).catch((err: unknown) => {
                         console.error('Error initializing WebViewer:', err);
                         if (mountedRef.current) {
-                            setError(`Failed to initialize PDF viewer: ${err?.message || 'Unknown error'}`);
+                            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+                            setError(`Failed to initialize PDF viewer: ${errorMessage}`);
                         }
                         
                         // Clean up on initialization error
@@ -269,107 +369,8 @@ export const PdfViewerClient = ({
                 initializingRef.current = false;
             }
         };
-    }, [pdfUrl, shouldExtractText, paperId, isExtracting, isInitialized, cleanUpViewer, textSnippet]);
+    }, [pdfUrl, shouldExtractText, paperId, isExtracting, isInitialized, cleanUpViewer, textSnippet, onTextExtractionComplete, extractTextFromPdf]);
     
-    // Function to extract text with batching
-    const extractTextFromPdf = useCallback(async (instance: any, paperIdToExtract: string) => {
-        if (isExtracting) {
-            console.log('Already extracting text, skipping duplicate call');
-            return;
-        }
-        
-        try {
-            setIsExtracting(true);
-            setExtractionProgress(0);
-            
-            console.log('Starting text extraction for document');
-            const documentViewer = instance.Core.documentViewer;
-            const totalPages = await documentViewer.getPageCount();
-            console.log(`Found ${totalPages} pages for extraction`);
-            
-            if (totalPages === 0) {
-                console.error('No pages found in document');
-                setIsExtracting(false);
-                onTextExtractionComplete?.(false);
-                return;
-            }
-            
-            const doc = await documentViewer.getDocument();
-            const batchSize = 10; // Process 10 pages at a time
-            const batches = Math.ceil(totalPages / batchSize);
-            let extractedText: string = '';
-            
-            for (let batch = 0; batch < batches; batch++) {
-                // Calculate page range for this batch (1-indexed for PDF.js Express)
-                const startPage = batch * batchSize + 1;
-                const endPage = Math.min((batch + 1) * batchSize, totalPages);
-                console.log(`Processing batch ${batch + 1}/${batches}: pages ${startPage}-${endPage}`);
-                
-                // Extract text for each page in batch
-                for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-                    try {
-                        const text = await doc.loadPageText(pageNum);
-                        extractedText += `[START_PAGE]${text}[END_PAGE]`;
-                    } catch (error) {
-                        console.error(`Error extracting text from page ${pageNum}, retrying...`, error);
-                        
-                        // Retry once with delay
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        
-                        try {
-                            const text = await doc.loadPageText(pageNum);
-                            extractedText += `[START_PAGE]${text}[END_PAGE]`;
-                        } catch (retryError) {
-                            console.error(`Failed to extract text from page ${pageNum} after retry`, retryError);
-                            extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
-                        }
-                    }
-                    
-                    // Update progress
-                    const progress = Math.round(((batch * batchSize) + (pageNum - startPage + 1)) / totalPages * 100);
-                    setExtractionProgress(progress);
-                    onTextExtractionProgress?.(progress);
-                }
-            }
-            
-            // Send extracted text to backend
-            console.log('Sending extracted text to backend');
-            
-            try {
-                const response = await api.post(
-                    `/api/files/${paperIdToExtract}/save-text`,
-                    { 
-                        textByPages: extractedText,
-                        totalPages,
-                    },
-                    { 
-                        headers: { 'Content-Type': 'application/json' },
-                        timeout: 30000 // 30 seconds timeout
-                    }
-                );
-                
-                console.log('Text extraction complete:', response);
-                
-                // Clear the active extraction
-                PDFViewerManager.setActiveExtraction(null);
-                
-                onTextExtractionComplete?.(true);
-            } catch (apiError) {
-                console.error('API error saving extracted text:', apiError);
-                onTextExtractionComplete?.(false);
-                
-                // Clear the active extraction on error too
-                PDFViewerManager.setActiveExtraction(null);
-            }
-        } catch (error) {
-            console.error('Error in text extraction process:', error);
-            setIsExtracting(false);
-            onTextExtractionComplete?.(false);
-            
-            // Clear the active extraction on any error
-            PDFViewerManager.setActiveExtraction(null);
-        }
-    }, [isExtracting, onTextExtractionComplete, onTextExtractionProgress]);
 
     return (
         <div className="PdfViewer" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>

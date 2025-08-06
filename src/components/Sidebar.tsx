@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useFileSystemStore } from '../store/filesystem';
 import { fileSystemService } from '../services/filesystem';
 import { useUIStore } from '../store/ui';
@@ -14,7 +14,7 @@ export default function Sidebar() {
   const [newFolderName, setNewFolderName] = useState('');
   const { isSidebarCollapsed, setSidebarCollapsed } = useUIStore();
   const { currentFolderId, addFolder } = useFileSystemStore();
-  const { getFilePagesRemaining, hasExceededFileLimit, getCurrentFilePagesLimit } = useSubscriptionStore();
+  const { getFilePagesRemaining, getCurrentFilePagesLimit } = useSubscriptionStore();
 
   // Check if user has app access for enabling/disabling features
   const hasAppAccess = subscriptionService.hasAppAccess();
@@ -156,26 +156,6 @@ export default function Sidebar() {
         <HamburgerIcon />
       </button>
     </div>
-  );
-}
-
-// Simple folder icon component
-function FolderIcon({ className = 'w-6 h-6' }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-      />
-    </svg>
   );
 }
 

@@ -8,9 +8,7 @@ import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { useChatStore } from '../store/chat';
 import { fileSystemService } from '../services/filesystem';
 import { subscriptionService } from '../services/subscription';
-import Tooltip from './Tooltip';
 import api from '../lib/api';
-import { get } from 'http';
 import { useToast } from './ToastProvider';
 import { PDFDocument } from 'pdf-lib';
 
@@ -101,7 +99,7 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const uploadedFile = await fileSystemService.uploadFile(
-          file as any,
+          file,
           targetFolderId || undefined
         );
         addFile(uploadedFile);

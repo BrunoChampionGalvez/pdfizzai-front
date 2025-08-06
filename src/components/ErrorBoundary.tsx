@@ -43,7 +43,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
           <div className="text-red-500 text-4xl mb-4">⚠️</div>
           <h2 className="text-2xl font-bold text-text-primary mb-4">Something went wrong</h2>
           <p className="text-secondary mb-6 max-w-md">
-            We're sorry, but an error occurred while trying to display this content.
+            We&apos;re sorry, but an error occurred while trying to display this content.
           </p>
           <div className="bg-background-secondary p-4 rounded-md mb-6 w-full max-w-lg overflow-auto text-left">
             <pre className="text-sm text-red-400 whitespace-pre-wrap break-words">

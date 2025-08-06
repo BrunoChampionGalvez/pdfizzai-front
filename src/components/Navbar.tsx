@@ -33,7 +33,7 @@ export default function Navbar() {
             console.error('Failed to load subscription data:', error);
           }
         }
-      } catch (error) {
+      } catch {
         setUser(null);
       } finally {
         setIsCheckingAuth(false);

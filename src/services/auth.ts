@@ -67,7 +67,7 @@ export const authService = {
     try {
       await this.getMe();
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   },

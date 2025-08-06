@@ -11,47 +11,26 @@ import UsageBar from '../../components/UsageBar';
 import * as Paddle from '@paddle/paddle-js';
 import { PlanName, SubscribeTypes, SubscriptionStatus } from '../../types/subscription';
 
-interface SubscriptionData {
-  id: string;
-  plan: 'Starter' | 'Pro' | 'Enterprise';
-  status: 'active' | 'canceled' | 'past_due' | 'trialing';
-  nextBillingDate: string;
-  endDate?: string;
-  price: string;
-  interval: 'monthly' | 'annually';
-  chatMessagesUsed: number;
-  chatMessagesLimit: number;
-  pdfUploadsUsed: number;
-  pdfUploadsLimit: number;
-  isTrial: boolean;
-  trialEndsAt?: string;
-}
+// Removed unused SubscriptionData interface
 
 export default function SubscriptionPage() {
   return <SubscriptionPageContent />;
 }
 
 function SubscriptionPageContent() {
-  const { showSuccess, showError, showInfo } = useToast();
+  const { showSuccess, showError } = useToast();
   const { user, isAuthenticated } = useAuthStore();
   const { 
     dbSubscription, 
     subscriptionUsage, 
     userFilePagesCount, 
     isLoading, 
-    error,
-    isSubscriptionActive,
-    isTrialUser,
-    getCurrentMessageLimit,
-    getCurrentFilePagesLimit,
-    getMessagesRemaining,
-    getFilePagesRemaining,
-    getNextBillingDate
+    error
   } = useSubscriptionStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [isProcessingUpgrade, setIsProcessingUpgrade] = useState(false);
   const [isProcessingDowngrade, setIsProcessingDowngrade] = useState(false);
-  const [isProcessingCancelDowngrade, setIsProcessingCancelDowngrade] = useState(false);
+
   const [showCancelDowngradeModal, setShowCancelDowngradeModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -95,24 +74,7 @@ function SubscriptionPageContent() {
     setIsProcessingPayment(false);
   };
 
-  const monthlyStarter: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtb4tanwae3pv22fyewn0g',
-    quantity: 1,
-  }]
 
-  const yearlyStarter: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtd41z144brf89mj9nf69f',
-    quantity: 1,
-  }]
-
-  const monthlyPro: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtps3cxzxfasnm66p9zv17',
-    quantity: 1,
-  }]
-  const yearlyPro: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtqfqrzfx707b60n9gepax',
-    quantity: 1,
-  }]
 
   const openCheckout = async (subscribeType: SubscribeTypes) => {
     // Check if subscription is scheduled for cancellation OR active and show appropriate modal
@@ -162,8 +124,8 @@ function SubscriptionPageContent() {
           if (user?.paddleCustomerId) {
             try {
               authToken = await paymentService.generateAuthTokenCustomer(user.paddleCustomerId);
-            } catch (error) {
-              console.error('Failed to generate auth token:', error);
+            } catch (err) {
+              console.error('Failed to generate auth token:', err);
             }
           }
           
@@ -194,7 +156,7 @@ function SubscriptionPageContent() {
           } else {
             showError('Upgrade Failed', 'Failed to upgrade subscription. Please try again later.');
           }
-        } catch (error) {
+        } catch {
           showError('Upgrade Failed', 'Failed to upgrade subscription. Please try again later.');
         }
       } else {
@@ -252,7 +214,7 @@ function SubscriptionPageContent() {
           } else {
             showError('Downgrade Failed', 'Failed to downgrade subscription. Please try again later.');
           }
-        } catch (error) {
+        } catch {
           showError('Downgrade Failed', 'Failed to downgrade subscription. Please try again later.');
         }
       } else {
@@ -308,8 +270,8 @@ function SubscriptionPageContent() {
         if (!isAuthenticated) return;
         
         // Initialize Paddle on client side
-        const paddle = await Paddle.initializePaddle({
-          token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
+        await Paddle.initializePaddle({
+          token: process.env.NEXT_PUBLIC_PADDLE_KEY as string, // replace with a client-side token
           environment: 'sandbox',
           eventCallback: async (event) => {
             if (event.name === 'checkout.completed') {
@@ -339,7 +301,7 @@ function SubscriptionPageContent() {
         });
       };
       initializePaddleFunction();
-    }, [isAuthenticated]);
+    }, [isAuthenticated, showSuccess, user?.id]);
   
 
   useEffect(() => {
@@ -420,7 +382,7 @@ function SubscriptionPageContent() {
 
   const cancelDowngrade = async () => {
     setShowCancelDowngradeModal(false);
-    setIsProcessingCancelDowngrade(true);
+    setIsProcessing(true);
     await paymentService.cancelDowngrade(dbSubscription?.paddleSubscriptionId);
     setShowDowngradeModal(false);
     if (user?.id) {
@@ -428,7 +390,7 @@ function SubscriptionPageContent() {
     }
 
     showSuccess('Downgrade Canceled', 'Your subscription will remain on the Pro plan.');
-    setIsProcessingCancelDowngrade(false);
+    setIsProcessing(false);
   }
 
   const confirmReactivate = async () => {
@@ -444,24 +406,7 @@ function SubscriptionPageContent() {
     }
   };
 
-  const handlePlanChange = async (newPlan: 'Starter' | 'Pro') => {
-    setIsProcessing(true);
-    try {
-      // TODO: Implement plan change in payment service
-      showInfo(
-        'Feature Coming Soon',
-        'Plan change functionality will be available soon.'
-      );
-    } catch (error) {
-      console.error('Failed to change plan:', error);
-      showError(
-        'Plan Change Failed',
-        'Failed to change plan. Please try again later.'
-      );
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+
 
   const closeCheckout = () => {
       Paddle.getPaddleInstance()?.Checkout.close();
@@ -483,7 +428,7 @@ function SubscriptionPageContent() {
         </div>
       </div>
     );
-  }
+  };;
 
   if (isLoading) {
     return (
@@ -515,7 +460,7 @@ function SubscriptionPageContent() {
       <div className="min-h-screen bg-primary flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-text-primary mb-4">No Active Subscription</h2>
-          <p className="text-secondary mb-6">You don't have an active subscription yet.</p>
+          <p className="text-secondary mb-6">You don&apos;t have an active subscription yet.</p>
           <button 
             onClick={() => router.push('/pricing')}
             className="bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200"
@@ -547,7 +492,6 @@ function SubscriptionPageContent() {
     if (!showReactivateModal) return null;
 
     const isScheduledCancel = dbSubscription?.scheduledCancel;
-    const isCanceled = dbSubscription?.status === SubscriptionStatus.CANCELED;
     const planName = dbSubscription?.plan?.name === 'starter' ? 'Starter' : dbSubscription?.plan?.name === 'pro' ? 'Pro' : 'Enterprise';
     const planPrice = dbSubscription?.plan ? (dbSubscription.plan.price / 100).toFixed(2) : '0.00';
 
@@ -585,18 +529,18 @@ function SubscriptionPageContent() {
               <ul className="text-xs text-accent-100/40 space-y-1">
                 {isScheduledCancel ? (
                   <>
-                    <li>• Your subscription will remain active and won't be canceled</li>
-                    <li>• You'll keep access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                    <li>• You'll keep access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
-                    <li>• You'll continue to be billed ${planPrice} per {dbSubscription?.interval || 'month'}</li>
+                    <li>• Your subscription will remain active and won&apos;t be canceled</li>
+                    <li>• You&apos;ll keep access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
+                    <li>• You&apos;ll keep access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
+                    <li>• You&apos;ll continue to be billed ${planPrice} per {dbSubscription?.interval || 'month'}</li>
                     <li>• No additional charges apply</li>
                   </>
                 ) : (
                   <>
-                    <li>• You'll be charged ${planPrice} for your {planName} plan</li>
-                    <li>• You'll regain immediate access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                    <li>• You'll regain immediate access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
-                    <li>• You'll regain access to premium features and priority support</li>
+                    <li>• You&apos;ll be charged ${planPrice} for your {planName} plan</li>
+                    <li>• You&apos;ll regain immediate access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
+                    <li>• You&apos;ll regain immediate access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
+                    <li>• You&apos;ll regain access to premium features and priority support</li>
                     <li>• Your billing cycle will resume normally</li>
                   </>
                 )}
@@ -650,8 +594,8 @@ function SubscriptionPageContent() {
             {/* Description */}
             <p className="text-secondary text-center mb-6 leading-relaxed">
               Are you sure you want to cancel your <span className="font-medium text-text-primary">{dbSubscription?.plan?.name === 'starter' ? 'Starter' : dbSubscription?.plan?.name === 'pro' ? 'Pro' : 'Enterprise'} plan</span>? 
-              You'll continue to have access until <span className="font-medium text-text-primary">{new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</span>, 
-              but you won't be billed again.
+              You&apos;ll continue to have access until <span className="font-medium text-text-primary">{new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</span>, 
+              but you won&apos;t be billed again.
             </p>
 
             {/* Benefits reminder */}
@@ -661,7 +605,7 @@ function SubscriptionPageContent() {
                 <li>• You will lose access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
                 <li>• You will lose access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
                 <li>• You will lose access to premium features and priority support</li>
-                <li>• If you have a downgrade scheduled to a lower plan, it will be canceled and you won't be charged when the cancellation takes effect.</li>
+                <li>• If you have a downgrade scheduled to a lower plan, it will be canceled and you won&apos;t be charged when the cancellation takes effect.</li>
               </ul>
             </div>
 
@@ -692,7 +636,6 @@ function SubscriptionPageContent() {
     if (!showUpgradeModal) return null;
 
     const isScheduledCancel = dbSubscription?.scheduledCancel;
-    const isActive = dbSubscription?.status === SubscriptionStatus.ACTIVE;
 
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
@@ -726,15 +669,15 @@ function SubscriptionPageContent() {
               <ul className="text-xs text-accent-100/60 space-y-1">
                 {isScheduledCancel ? (
                   <>
-                    <li>• You'll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
-                    <li>• You'll get immediate access to all Pro features</li>
-                    <li>• The AI messages that you didn't use will be added to your new limit</li>
+                    <li>• You&apos;ll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
+                    <li>• You&apos;ll get immediate access to all Pro features</li>
+                    <li>• The AI messages that you didn&apos;t use will be added to your new limit</li>
                   </>
                 ) : (
                   <>
-                    <li>• You'll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
-                    <li>• You'll get immediate access to all Pro features (500 PDFs, 400 AI messages, priority support)</li>
-                    <li>• The AI messages that you didn't use will be added to your new limit</li>
+                    <li>• You&apos;ll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
+                    <li>• You&apos;ll get immediate access to all Pro features (500 PDFs, 400 AI messages, priority support)</li>
+                    <li>• The AI messages that you didn&apos;t use will be added to your new limit</li>
                   </>
                 )}
               </ul>
@@ -766,7 +709,6 @@ function SubscriptionPageContent() {
     if (!showDowngradeModal) return null;
 
     const isScheduledCancel = dbSubscription?.scheduledCancel;
-    const isActive = dbSubscription?.status === SubscriptionStatus.ACTIVE;
 
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
@@ -800,19 +742,19 @@ function SubscriptionPageContent() {
               <ul className="text-xs text-yellow-500/70 space-y-1">
                 {isScheduledCancel ? (
                   <>
-                    <li>• You'll lose Pro plan benefits when your next billing period starts on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
+                    <li>• You&apos;ll lose Pro plan benefits when your next billing period starts on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
                     <li>• Your AI chat messages will be limited to 200 per month (currently 400)</li>
                     <li>• Your PDF pages uploads will be limited to 2000 per month (currently 5000)</li>
-                    <li>• You'll lose priority support</li>
-                    <li>• Starting next billing cycle, you'll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
+                    <li>• You&apos;ll lose priority support</li>
+                    <li>• Starting next billing cycle, you&apos;ll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
                   </>
                 ) : (
                   <>
-                    <li>• You'll lose Pro plan benefits at your next billing period on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
+                    <li>• You&apos;ll lose Pro plan benefits at your next billing period on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
                     <li>• Your AI chat messages will be limited to 200 per month (currently 400)</li>
                     <li>• Your PDF pages uploads will be limited to 2000 per month (currently 5000)</li>
-                    <li>• You'll lose priority support</li>
-                    <li>• Starting next billing cycle, you'll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
+                    <li>• You&apos;ll lose priority support</li>
+                    <li>• Starting next billing cycle, you&apos;ll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
                   </>
                 )}
               </ul>
@@ -842,9 +784,6 @@ function SubscriptionPageContent() {
   const CancelDowngradeConfirmationModal = () => {
     if (!showCancelDowngradeModal) return null;
 
-    const hasDowngraded = dbSubscription?.hasDowngraded;
-    const isActive = dbSubscription?.status === SubscriptionStatus.ACTIVE;
-
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
         <div className="bg-background-secondary rounded-2xl max-w-md w-full mx-4 shadow-xl border border-secondary">
@@ -872,10 +811,10 @@ function SubscriptionPageContent() {
             <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-6">
               <h4 className="text-sm font-medium text-yellow-500 mb-2">What will happen:</h4>
               <ul className="text-xs text-yellow-500/70 space-y-1">
-                <li>• You'll keep all Pro plan benefits</li>
+                <li>• You&apos;ll keep all Pro plan benefits</li>
                 <li>• Your AI chat messages will remain at 400 per month</li>
                 <li>• Your PDF pages uploads will remain at 5000 per month</li>
-                <li>• You won't be charged for the Starter plan</li>
+                <li>• You won&apos;t be charged for the Starter plan</li>
               </ul>
             </div>
 
@@ -971,7 +910,7 @@ function SubscriptionPageContent() {
                     <h4 className="text-red-700 font-medium">Subscription Canceled</h4>
                     <p className="text-red-700 text-sm">
                       Your subscription will end on {new Date(dbSubscription.nextBillingAt).toLocaleDateString()}. 
-                      You'll continue to have access until then.
+                      You&apos;ll continue to have access until then.
                     </p>
                   </div>
                 </div>
@@ -988,7 +927,7 @@ function SubscriptionPageContent() {
                       <h4 className="text-yellow-400 font-medium">Subscription Set to Downgrade</h4>
                       <p className="text-yellow-500/60 text-sm">
                         Your subscription is set to downgrade to the <span className="font-semibold">Starter</span> plan on {new Date(dbSubscription.nextBillingAt).toLocaleDateString()}. 
-                        You'll continue to have access to {dbSubscription.plan?.name === PlanName.STARTER ? 'Starter' : dbSubscription.plan?.name === PlanName.PRO ? 'Pro' : 'Enterprise'} until then.
+                        You&apos;ll continue to have access to {dbSubscription.plan?.name === PlanName.STARTER ? 'Starter' : dbSubscription.plan?.name === PlanName.PRO ? 'Pro' : 'Enterprise'} until then.
                       </p>
                     </div>
                   </div>
@@ -1033,7 +972,7 @@ function SubscriptionPageContent() {
                   <div>
                     <h3 className="text-text-primary font-medium">Cancel Subscription</h3>
                     <p className="text-secondary text-sm">
-                      Cancel your subscription. You'll keep access until the end of your billing period.
+                      Cancel your subscription. You&apos;ll keep access until the end of your billing period.
                     </p>
                   </div>
                   <button
@@ -1161,7 +1100,7 @@ function SubscriptionPageContent() {
                   
                   {/* Features Summary */}
                   <div className="border-t border-secondary pt-4">
-                    <h5 className="text-sm font-medium text-text-primary mb-2">What's included:</h5>
+                    <h5 className="text-sm font-medium text-text-primary mb-2">What&apos;s included:</h5>
                     <ul className="text-sm text-secondary space-y-1">
                       {selectedPlan.name === 'starter' ? (
                         <>
@@ -1209,7 +1148,7 @@ function SubscriptionPageContent() {
                       <div className="bg-accent/10 border border-accent/30 rounded-lg p-3">
                         <h6 className="text-sm font-medium text-accent mb-1">Reactivation Details</h6>
                         <p className="text-sm text-secondary">
-                          Your {selectedPlan.name} plan will be reactivated and you'll regain access to all features immediately.
+                          Your {selectedPlan.name} plan will be reactivated and you&apos;ll regain access to all features immediately.
                         </p>
                       </div>
                     )}

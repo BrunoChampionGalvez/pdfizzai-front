@@ -80,7 +80,7 @@ export default function MessageBubble({
                 currentRefSegment.tag = { id: 'parse_error_non_object', text: '' } as ReferenceTag;
               }
             }
-          } catch (e: unknown) {
+          } catch {
             currentRefSegment.tag = { id: 'parse_error', text: '' } as ReferenceTag;
           }
         }
@@ -294,7 +294,7 @@ export default function MessageBubble({
                     ul: ({...props}) => <ul className="list-disc pl-6 my-2 space-y-1" {...props} />,
                     ol: ({...props}) => <ol className="list-decimal pl-6 my-2 space-y-1" {...props} />,
                     li: ({...props}) => <li className="my-1" {...props} />,
-                    code: ({ className, children, ...props }: React.ComponentPropsWithoutRef<'code'>) => {
+                    code: ({ children, ...props }: React.ComponentPropsWithoutRef<'code'>) => {
                       return (
                         <code className="bg-secondary px-1 py-0.5 rounded text-sm font-mono" {...props}>
                           {children}

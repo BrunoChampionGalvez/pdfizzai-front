@@ -15,16 +15,13 @@ import ChatPane from '../../components/ChatPane';
 import PDFViewer from '../../components/PDFContainer';
 import { setRedirectPath } from '../../lib/auth-utils';
 import { isAuthError } from '../../types/errors';
-import { initializePaddle, Environments } from '@paddle/paddle-js';
+import { initializePaddle } from '@paddle/paddle-js';
 
 export default function AppPage() {
   const { currentFolderId, setFolders, setFiles, setLoading: setFSLoading } = useFileSystemStore();
   const { 
-    currentSessionId, 
     currentReference, 
     setSessions, 
-    setCurrentSessionId,
-    addSession,
     setLoading: setChatLoading 
   } = useChatStore();
   const { user } = useAuthStore();
@@ -37,11 +34,8 @@ export default function AppPage() {
   useEffect(() => {
     const initializePaddleFunction = async () => {
     // Initialize Paddle on client side
-      const paddle = await initializePaddle({
-        token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
-        pwCustomer: {
-          id: 'ctm_01gt25aq4b2zcfw12szwtjrbdt' // replace with a customer Paddle ID
-        },
+      await initializePaddle({
+        token: process.env.NEXT_PUBLIC_PADDLE_KEY as string, // replace with a client-side token
         environment: 'sandbox'
       });
     }
@@ -107,7 +101,7 @@ export default function AppPage() {
     };
 
     checkAuth();
-  }, [router, user?.id]);
+  }, [router, user?.id, isSubscriptionActive]);
 
   // Conditionally refresh subscription data to catch webhook updates after payment
   useEffect(() => {
@@ -206,7 +200,7 @@ export default function AppPage() {
     // No polling needed if user has access and no payment indicators
     console.log('No subscription polling needed - user has access or no payment detected');
     console.log('Polling decision - needsPolling:', needsPolling, 'error:', error, 'mightBeFromPayment:', mightBeFromPayment, 'canceled:', dbSubscription?.status === 'canceled' || dbSubscription?.scheduledCancel);
-  }, [user?.id, error]);
+  }, [user?.id, error, dbSubscription?.scheduledCancel, dbSubscription?.status]);
 
   // Load initial folders and files
   useEffect(() => {

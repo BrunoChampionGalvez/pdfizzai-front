@@ -30,7 +30,6 @@ export default function ChatPane() {
     setLoading,
     currentReference,
     updateMessage,
-    updateMessageContent,
     updateMessageId,
     addSession
   } = useChatStore();
@@ -99,7 +98,7 @@ export default function ChatPane() {
     };
 
     loadChatHistory();
-  }, [currentSessionId, setMessages, setLoading, router]);
+  }, [currentSessionId, setMessages, setLoading, router, sessionJustCreated]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -232,7 +231,7 @@ export default function ChatPane() {
     } finally {
       setIsSearching(false);
     }
-  }, [router]);
+  }, []);
 
   // Handle search input change
   const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -337,7 +336,7 @@ export default function ChatPane() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e as any);
+      handleSubmit(e as React.FormEvent);
     }
   };
 
@@ -402,7 +401,7 @@ export default function ChatPane() {
 
       const currentTime = new Date().toISOString();
       // Add user message immediately with cleaned content and selected materials
-      let userMessage = {
+      const userMessage = {
         id: generateId(),
         role: 'user' as const,
         content: cleanedMessage,

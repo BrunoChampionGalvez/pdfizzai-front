@@ -16,7 +16,7 @@ import api from '../lib/api';
 
 export default function FolderTree() {
   const { folders, files, currentFolderId, setCurrentFolderId, isLoading, addFolder, removeFolder, removeFile, addFile, setFiles } = useFileSystemStore();
-  const { hasExceededFileLimit, getFilePagesRemaining, getCurrentFilePagesLimit } = useSubscriptionStore();
+  const { hasExceededFileLimit, getCurrentFilePagesLimit } = useSubscriptionStore();
   const { user } = useAuthStore();
   
   // Check if user has app access for enabling/disabling features
@@ -42,7 +42,7 @@ export default function FolderTree() {
   // PDF and chat integration
   const { setCurrentReference } = useChatStore();
   const { handleShowFile, setFileListRefreshHandler, triggerExtraction } = usePDFViewer();
-  const [fileListRefreshHandler, setFileListRefreshHandlerState] = useState<(() => void) | null>(null);
+
 
   // Initialize breadcrumb with root
   useEffect(() => {
@@ -64,7 +64,6 @@ export default function FolderTree() {
     };
     
     setFileListRefreshHandler(refreshFiles);
-    setFileListRefreshHandlerState(() => refreshFiles);
     
     // Cleanup on unmount
     return () => {
@@ -226,11 +225,6 @@ export default function FolderTree() {
     }
   };
 
-  // Navigation for breadcrumb
-  const navigateToLevel = (level: number) => {
-    setViewStartLevel(level);
-  };
-
   const goBack = () => {
     if (navigationHistory.length > 0) {
       // Go back to the previous view from history
@@ -244,27 +238,6 @@ export default function FolderTree() {
   };
 
 
-
-  // Get the folder name at a specific level for breadcrumb display
-  const getFolderAtLevel = (level: number): Folder | null => {
-    if (level === 0) return null; // Root level
-    
-    let currentFolders = folders.filter(f => f.parent_id === null);
-    
-    for (let i = 1; i <= level; i++) {
-      if (currentFolders.length === 0) return null;
-      
-      if (i === level) {
-        return currentFolders[0] || null;
-      }
-      
-      // Get children of the first folder in current level
-      const nextFolders = folders.filter(f => f.parent_id === currentFolders[0].id);
-      currentFolders = nextFolders;
-    }
-    
-    return null;
-  };
 
   // Handler for creating a new folder
   const handleCreateFolder = async () => {
@@ -492,33 +465,6 @@ export default function FolderTree() {
     
     setDropTarget(null);
     setDraggedItem(null);
-  };
-
-  // Get folders to display at the current view level
-  const getFoldersAtLevel = (level: number): Folder[] => {
-    if (level === 0) {
-      return folders.filter(folder => folder.parent_id === null);
-    }
-    
-    // Find folders at the specified level
-    let currentFolders = folders.filter(f => f.parent_id === null);
-    
-    for (let i = 1; i <= level; i++) {
-      if (currentFolders.length === 0) break;
-      
-      const nextLevelFolders: Folder[] = [];
-      for (const folder of currentFolders) {
-        const children = folders.filter(f => f.parent_id === folder.id);
-        nextLevelFolders.push(...children);
-      }
-      currentFolders = nextLevelFolders;
-      
-      if (i === level) {
-        return currentFolders;
-      }
-    }
-    
-    return [];
   };
 
   // Get the folders that should be visible at the current viewStartLevel
@@ -842,7 +788,7 @@ export default function FolderTree() {
           {itemToDelete?.type === 'folder' ? (
             <>
               <p className="text-sm text-text-primary">
-                Are you sure you want to delete the folder "{itemToDelete.name}" and all its contents? This action cannot be undone.
+                Are you sure you want to delete the folder &quot;{itemToDelete.name}&quot; and all its contents? This action cannot be undone.
               </p>
               <div className="mt-2">
                 <label htmlFor="confirm-text" className="block text-sm font-medium text-text-primary">
@@ -861,7 +807,7 @@ export default function FolderTree() {
             </>
           ) : (
             <p className="text-sm text-text-primary">
-              Are you sure you want to delete the file "{itemToDelete?.name}"? This action cannot be undone.
+              Are you sure you want to delete the file &quot;{itemToDelete?.name}&quot;? This action cannot be undone.
             </p>
           )}
           <div className="flex justify-end space-x-2">

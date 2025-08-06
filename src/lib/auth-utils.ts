@@ -49,14 +49,14 @@ export const extractErrorMessage = (error: unknown): string => {
   }
   
   if (typeof error === 'object' && error !== null) {
-    if ('message' in error && typeof (error as any).message === 'string') {
-      return (error as any).message;
+    if ('message' in error && typeof (error as { message: unknown }).message === 'string') {
+      return (error as { message: string }).message;
     }
     
     if ('response' in error && 
-        typeof (error as any).response === 'object' && 
-        (error as any).response !== null) {
-      const response = (error as any).response;
+        typeof (error as { response: unknown }).response === 'object' && 
+        (error as { response: unknown }).response !== null) {
+      const response = (error as { response: { data?: unknown; status?: unknown } }).response;
       
       if ('data' in response && typeof response.data === 'object' && response.data !== null) {
         if ('message' in response.data && typeof response.data.message === 'string') {
@@ -80,7 +80,7 @@ export const extractErrorMessage = (error: unknown): string => {
 };
 
 // Handle auth errors consistently
-export const handleAuthError = (error: unknown, router: any): void => {
+export const handleAuthError = (error: unknown): void => {
   console.error('Authentication error:', error);
   
   if (typeof window !== 'undefined') {

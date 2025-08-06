@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { DbSubscription, SubscriptionUsage, SubscriptionPlan } from '../services/payment';
+import type { DbSubscription, SubscriptionUsage } from '../services/payment';
 
 export interface UserFilePagesCount {
   totalFilePages: number;
@@ -101,7 +101,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
   
   // Get remaining messages
   getMessagesRemaining: () => {
-    const { subscriptionUsage, dbSubscription } = get();
+    const { subscriptionUsage } = get();
     const messageLimit = get().getCurrentMessageLimit();
     if (!subscriptionUsage) return messageLimit;
 
@@ -110,7 +110,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set, get) => ({
 
   // Get remaining file pages
   getFilePagesRemaining: () => {
-    const { userFilePagesCount, dbSubscription } = get();
+    const { userFilePagesCount } = get();
     const filePagesLimit = get().getCurrentFilePagesLimit();
     if (!userFilePagesCount) return filePagesLimit;
 

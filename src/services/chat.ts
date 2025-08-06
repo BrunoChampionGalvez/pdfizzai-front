@@ -31,7 +31,7 @@ export interface SendMessagePayload {
   content: string;
   fileIds?: string[];
   folderIds?: string[];
-  selectedMaterials?: any[];
+  selectedMaterials?: unknown[];
 }
 
 export const chatService = {
@@ -41,7 +41,7 @@ export const chatService = {
   },
 
   // Generator function for streaming messages
-  async* sendMessageStream(sessionId: string, message: string, fileIds?: string[], folderIds?: string[], selectedMaterials?: any[]): AsyncGenerator<string, ChatResponse, unknown> {
+  async* sendMessageStream(sessionId: string, message: string, fileIds?: string[], folderIds?: string[], selectedMaterials?: unknown[]): AsyncGenerator<string, ChatResponse, unknown> {
     const payload: SendMessagePayload = { content: message };
     if (fileIds && fileIds.length > 0) {
       payload.fileIds = fileIds;
@@ -80,7 +80,7 @@ export const chatService = {
         try {
           const errorData = await response.json();
           throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-        } catch (parseError) {
+        } catch {
           // If we can't parse the error response, use status code
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -124,7 +124,7 @@ export const chatService = {
                 streamedContent += parsedData;
                 console.log('[STREAMING] Yielding chunk:', parsedData.substring(0, 50) + '...');
                 yield parsedData;
-              } catch (error) {
+              } catch {
                 // If it's not JSON, treat as text chunk and check for message ID markers
                 console.log('[STREAMING] Non-JSON chunk:', data.substring(0, 50) + '...');
                 

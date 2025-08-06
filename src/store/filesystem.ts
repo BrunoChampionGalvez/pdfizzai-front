@@ -20,7 +20,7 @@ interface FileSystemState {
   fetchFiles: () => Promise<void>;
 }
 
-export const useFileSystemStore = create<FileSystemState>((set, get) => ({
+export const useFileSystemStore = create<FileSystemState>((set) => ({
   folders: [],
   files: [],
   currentFolderId: null,

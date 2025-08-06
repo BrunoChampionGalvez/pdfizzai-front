@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface ToastProps {
   id: string;
@@ -21,6 +21,13 @@ export default function Toast({ id, type, title, message, duration = 5000, onClo
     return () => clearTimeout(timer);
   }, []);
 
+  const handleClose = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => {
+      onClose(id);
+    }, 300);
+  }, [id, onClose]);
+
   useEffect(() => {
     if (duration > 0) {
       const timer = setTimeout(() => {
@@ -28,14 +35,7 @@ export default function Toast({ id, type, title, message, duration = 5000, onClo
       }, duration);
       return () => clearTimeout(timer);
     }
-  }, [duration]);
-
-  const handleClose = () => {
-    setIsExiting(true);
-    setTimeout(() => {
-      onClose(id);
-    }, 300);
-  };
+  }, [duration, handleClose]);
 
   const getToastStyles = () => {
     const baseStyles = 'p-4 rounded-lg shadow-lg border-l-4 backdrop-blur-sm';

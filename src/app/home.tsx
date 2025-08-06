@@ -17,7 +17,7 @@ export default function Home() {
         const user = await authService.getMe();
         setUser(user);
         router.push('/app');
-      } catch (error) {
+      } catch {
         setUser(null);
       } finally {
         setLoading(false);

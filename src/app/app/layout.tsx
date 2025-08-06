@@ -12,7 +12,7 @@ import { PDFViewerProvider } from '../../contexts/PDFViewerContext';
 import { ToastProvider } from '../../components/ToastProvider';
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { isAuthenticated, isLoading, user, setUser, setLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, setUser, setLoading } = useAuthStore();
   const { clearAll } = useChatStore();
   const router = useRouter();
   const previousUserIdRef = useRef<string | null>(null);
@@ -31,7 +31,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         
         previousUserIdRef.current = currentUser.id;
         setUser(currentUser);
-      } catch (error) {
+      } catch {
         // User logged out or session expired
         if (previousUserIdRef.current) {
           console.log('User logged out, clearing chat state');

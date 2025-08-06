@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { authService } from '../../../services/auth';
 import { useAuthStore } from '../../../store/auth';
 import { countries } from '../../../lib/countries';
-import { getRedirectPath, clearRedirectPath } from '../../../lib/auth-utils';
+// Removed unused imports
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -18,7 +18,7 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { setUser } = useAuthStore();
   const router = useRouter();
-  const searchParams = useSearchParams();
+  // Removed unused searchParams
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,8 +46,13 @@ export default function SignupPage() {
       setUser(response.user);
 
       if (response.user) router.push('/pricing');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to sign up. Please try again.');
+    } catch (err: unknown) {
+      const errorMessage = err && typeof err === 'object' && 'response' in err && 
+        err.response && typeof err.response === 'object' && 'data' in err.response &&
+        err.response.data && typeof err.response.data === 'object' && 'message' in err.response.data
+        ? String(err.response.data.message)
+        : 'Failed to sign up. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

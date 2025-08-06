@@ -1,9 +1,8 @@
 'use client';
 
 import * as Paddle from '@paddle/paddle-js';
-import Image from 'next/image';
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
+// Removed unused imports
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/auth';
 import { useSubscriptionStore } from '../../store/subscription';
@@ -27,7 +26,7 @@ export default function PricingPage() {
   const router = useRouter();
 
   // Function to poll for subscription activation after payment
-  const pollForSubscriptionActivation = async (userId: string) => {
+  const pollForSubscriptionActivation = useCallback(async (userId: string) => {
     const maxAttempts = 30; // Poll for up to 30 attempts (1 minute at 2-second intervals)
     let attempts = 0;
     
@@ -61,7 +60,7 @@ export default function PricingPage() {
     console.log('Subscription polling timed out, redirecting anyway...');
     setIsProcessingPayment(false);
     router.push('/app'); // Redirect anyway - app will handle the subscription check
-  };
+  }, [router, setIsProcessingPayment]);
 
   const monthlyStarter: Paddle.CheckoutLineItem[] = [{
     priceId: 'pri_01jzvtb4tanwae3pv22fyewn0g',
@@ -71,10 +70,7 @@ export default function PricingPage() {
     priceId: 'pri_01jzvtvh1gm7s98g4mxg2syfbj',
     quantity: 1,
   }]
-  const yearlyStarterWithTrial: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtd41z144brf89mj9nf69f', // You may need a different priceId for yearly trial
-    quantity: 1,
-  }]
+  // Removed unused yearlyStarterWithTrial
   const yearlyStarter: Paddle.CheckoutLineItem[] = [{
     priceId: 'pri_01jzvtd41z144brf89mj9nf69f',
     quantity: 1,
@@ -91,10 +87,7 @@ export default function PricingPage() {
     priceId: 'pri_01jzvtxhb6bepcqhme0ynrg4wm',
     quantity: 1,
   }]
-  const yearlyProWithTrial: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtxhb6bepcqhme0ynrg4wm', // You may need a different priceId for yearly trial
-    quantity: 1,
-  }]
+  // Removed unused yearlyProWithTrial
 
   const openCheckout = async (items: Paddle.CheckoutOpenLineItem[], planInfo: {
     name: string;
@@ -146,11 +139,11 @@ export default function PricingPage() {
               router.push('/app');
               return;
             }
-          } catch (error) {
-            console.error('Failed to load subscription data:', error);
+          } catch (err) {
+            console.error('Failed to load subscription data:', err);
           }
         }
-      } catch (error) {
+      } catch {
         // User not authenticated, which is fine for pricing page
         setUser(null);
       } finally {
@@ -159,7 +152,7 @@ export default function PricingPage() {
     };
 
     checkAuth();
-  }, [setUser]);
+  }, [setUser, router]);
 
   useEffect(() => {
     const initializePaddleFunction = async () => {
@@ -167,8 +160,8 @@ export default function PricingPage() {
       if (!isAuthenticated) return;
       
       // Initialize Paddle on client side
-      const paddle = await Paddle.initializePaddle({
-        token: 'test_2e2147bc43b16fada23cc993b41', // replace with a client-side token
+      await Paddle.initializePaddle({
+        token: process.env.NEXT_PUBLIC_PADDLE_KEY as string, // replace with a client-side token
         environment: 'sandbox',
         eventCallback: async (event) => {
           if (event.name === 'checkout.completed') {
@@ -200,7 +193,7 @@ export default function PricingPage() {
     if (!isCheckingAuth) {
       initializePaddleFunction();
     }
-  }, [isAuthenticated, isCheckingAuth]);
+  }, [isAuthenticated, isCheckingAuth, user?.id, pollForSubscriptionActivation]);
 
   // Re-initialize Paddle when selectedPlan changes to ensure checkout container is ready
   useEffect(() => {
@@ -210,8 +203,8 @@ export default function PricingPage() {
       // Small delay to ensure DOM element exists
       setTimeout(async () => {
         try {
-          const paddle = await Paddle.initializePaddle({
-            token: 'test_2e2147bc43b16fada23cc993b41',
+          await Paddle.initializePaddle({
+            token: process.env.NEXT_PUBLIC_PADDLE_KEY as string,
             environment: 'sandbox',
             eventCallback: async (event) => {
               if (event.name === 'checkout.completed') {
@@ -237,14 +230,14 @@ export default function PricingPage() {
               }
             }
           });
-        } catch (error) {
-          console.error('Failed to reinitialize Paddle:', error);
+        } catch (err) {
+          console.error('Failed to reinitialize Paddle:', err);
         }
       }, 100);
     };
     
     reinitializePaddle();
-  }, [selectedPlan, isAuthenticated]);
+  }, [selectedPlan, isAuthenticated, user?.id, pollForSubscriptionActivation]);
 
   const closeCheckout = () => {
     Paddle.getPaddleInstance()?.Checkout.close();
@@ -632,7 +625,7 @@ export default function PricingPage() {
                 
                 {/* Features Summary */}
                 <div className="border-t border-secondary pt-4">
-                  <h5 className="text-sm font-medium text-text-primary mb-2">What's included:</h5>
+                  <h5 className="text-sm font-medium text-text-primary mb-2">What&apos;s included:</h5>
                   <ul className="text-sm text-secondary space-y-1">
                     {selectedPlan.name === 'Starter' ? (
                       <>

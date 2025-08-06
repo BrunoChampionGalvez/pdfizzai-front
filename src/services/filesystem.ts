@@ -35,9 +35,9 @@ export const fileSystemService = {
     await api.delete(`/api/folders/${folderId}`);
   },
 
-  async uploadFile(file: File, folderId?: string): Promise<File> {
+  async uploadFile(file: globalThis.File, folderId?: string): Promise<File> {
     const formData = new FormData();
-    formData.append('file', file as any);
+    formData.append('file', file);
     if (folderId) {
       formData.append('folderId', folderId);
     }

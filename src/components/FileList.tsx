@@ -72,28 +72,6 @@ export default function FileList({ files }: FileListProps) {
   };
 
   // Drag handlers for files
-  const handleFileDragStart = (fileId: string, e: React.DragEvent) => {
-    e.dataTransfer.effectAllowed = 'move';
-    setDraggedFile(fileId);
-    
-    // Create custom ghost image
-    const file = files.find(f => f.id === fileId);
-    if (file) {
-      const ghostElement = document.createElement('div');
-      ghostElement.textContent = file.filename ?? 'File loading...';
-      ghostElement.className = 'bg-background-secondary text-text-primary p-2 rounded-md border border-accent';
-      document.body.appendChild(ghostElement);
-      e.dataTransfer.setDragImage(ghostElement, 0, 0);
-      
-      // Set data for external drop handlers
-      e.dataTransfer.setData('application/refery-file', fileId);
-      
-      // Remove ghost element after drag starts
-      setTimeout(() => {
-        document.body.removeChild(ghostElement);
-      }, 0);
-    }
-  };
   
   const handleFileDragEnd = () => {
     setDraggedFile(null);
@@ -153,7 +131,7 @@ export default function FileList({ files }: FileListProps) {
       >
         <div className="space-y-4">
           <p className="text-sm text-text-primary">
-            Are you sure you want to delete the file "{fileToDelete?.filename ?? 'File loading.'}"? This action cannot be undone.
+            Are you sure you want to delete the file &quot;{fileToDelete?.filename ?? 'File loading.'}&quot;? This action cannot be undone.
           </p>
           <div className="flex justify-end space-x-2">
             <button

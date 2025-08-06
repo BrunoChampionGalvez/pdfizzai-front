@@ -5,14 +5,14 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authService } from '../../../services/auth';
 import { useAuthStore } from '../../../store/auth';
-import { getRedirectPath, clearRedirectPath, setRedirectPath } from '../../../lib/auth-utils';
+import { getRedirectPath, clearRedirectPath } from '../../../lib/auth-utils';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [redirectTarget, setRedirectTarget] = useState<string | null>(null);
+  const [redirectTarget] = useState<string | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const isRedirecting = useRef<boolean>(false);
   
@@ -79,9 +79,14 @@ export default function LoginPage() {
       // Use window.location for a hard navigation instead of router.push
       // This will reload the page and create a fresh React context
       window.location.href = target;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Login error:', err);
-      setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
+      const errorMessage = err && typeof err === 'object' && 'response' in err && 
+        err.response && typeof err.response === 'object' && 'data' in err.response &&
+        err.response.data && typeof err.response.data === 'object' && 'message' in err.response.data
+        ? String(err.response.data.message)
+        : 'Login failed. Please check your credentials.';
+      setError(errorMessage);
       isRedirecting.current = false;
     } finally {
       if (!isRedirecting.current) {
@@ -153,7 +158,7 @@ export default function LoginPage() {
 
           <div className="mt-6 text-center">
             <p className="text-secondary">
-              Don't have an account?{' '}
+              Don&apos;t have an account?{' '}
               <Link href="/auth/signup" className="text-accent hover:underline">
                 Sign up
               </Link>

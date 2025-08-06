@@ -17,7 +17,7 @@ let lastCleanupTime = 0;
 // Debug mode
 const DEBUG = true;
 
-const debugLog = (...args: any[]) => {
+const debugLog = (...args: unknown[]) => {
   if (DEBUG) console.log('[PDFViewerManager]', ...args);
 };
 
@@ -168,7 +168,7 @@ export async function clearAllViewers(): Promise<void> {
   return new Promise<void>(resolve => setTimeout(resolve, 300));
 }
 
-export default {
+const PDFViewerManager = {
   requestInitialization,
   releaseInitializationLock,
   registerViewer,
@@ -178,3 +178,5 @@ export default {
   hasActiveViewers,
   clearAllViewers
 };
+
+export default PDFViewerManager;
