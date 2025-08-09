@@ -15,7 +15,7 @@ declare module '@pdftron/pdfjs-express-viewer' {
     removeEventListener: (event: string, callback: (data?: unknown) => void) => void;
     getPageCount: () => number;
     getDocument: () => {
-      getPageText: (pageNumber: number) => Promise<string>;
+      loadPageText: (pageNumber: number) => Promise<string>;
     };
   }
 

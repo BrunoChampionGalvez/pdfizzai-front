@@ -97,7 +97,7 @@ export const PdfExtractor: React.FC<PdfExtractorProps> = ({
         
         for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
           try {
-            const text = await doc.getPageText(pageNum);
+            const text = await doc.loadPageText(pageNum);
             extractedText += `[START_PAGE]${text}[END_PAGE]`;
 
             console.log(`[PDF Extractor] Extracted text from page ${pageNum}: ${text?.substring(0, 100)}...`);

@@ -94,7 +94,7 @@ export const PdfViewerClient = ({
                 // Extract text for each page in batch
                 for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
                     try {
-                        const text = await doc.getPageText(pageNum);
+                        const text = await doc.loadPageText(pageNum);
                         extractedText += `[START_PAGE]${text}[END_PAGE]`;
                     } catch (error) {
                         console.error(`Error extracting text from page ${pageNum}, retrying...`, error);
@@ -103,7 +103,7 @@ export const PdfViewerClient = ({
                         await new Promise(resolve => setTimeout(resolve, 100));
                         
                         try {
-                            const text = await doc.getPageText(pageNum);
+                            const text = await doc.loadPageText(pageNum);
                             extractedText += `[START_PAGE]${text}[END_PAGE]`;
                         } catch (retryError) {
                             console.error(`Failed to extract text from page ${pageNum} after retry`, retryError);
