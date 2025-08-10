@@ -20,7 +20,6 @@ export default function PDFViewer() {
     currentFileId,
     error,
     handleShowFile,
-    handleHideFileDisplay,
     handleTextExtractionComplete,
     clearError
   } = usePDFViewer();
@@ -51,18 +50,7 @@ export default function PDFViewer() {
       }`}
     >
       <div className="h-full flex flex-col">
-        <div className="bg-background-primary p-4 flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-text-primary">Document Viewer</h2>
-          <button 
-            onClick={() => {
-              useChatStore.getState().setCurrentReference(null);
-              handleHideFileDisplay();
-            }}
-            className="text-text-secondary hover:text-accent p-1 rounded-full"
-          >
-            <CloseIcon />
-          </button>
-        </div>
+        {/* Header with close button removed; close control now in CustomPdfViewer */}
         
         <div className="flex-1 bg-background-primary rounded-lg flex items-center justify-center">
           {isLoadingFile ? (
@@ -120,13 +108,5 @@ export default function PDFViewer() {
         </div>
       </div>
     </div>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
   );
 }

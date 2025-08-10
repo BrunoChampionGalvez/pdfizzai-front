@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 
 // Import the client-side component with dynamic loading
 const PdfViewerClient = dynamic(
-  () => import('./pdf-viewer-client').then(mod => ({ default: mod.PdfViewerClient })),
+  () => import('./custom-pdf-viewer').then(mod => ({ default: mod.CustomPdfViewer })),
   { 
     ssr: false, 
     loading: () => (

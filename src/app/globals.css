@@ -170,21 +170,68 @@ html, body {
 /* PDF Text Layer - For text selection */
 .react-pdf__Page__textContent {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  overflow: hidden;
+  inset: 0; /* replaces top/left/right/bottom */
+  overflow: clip; /* avoid affecting layout */
   color: transparent;
   user-select: text;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
 }
 
+/* Ensure spans follow PDF.js expectations */
 .react-pdf__Page__textContent span {
   color: transparent;
+  position: absolute;
+  white-space: pre;
+  margin: 0;
+  transform-origin: 0% 0%;
 }
 
 /* Highlighting */
 .pdf-highlighting .textLayer span.highlight {
   background-color: rgba(34, 211, 238, 0.4);
   border-radius: 2px;
+}
+
+/* Custom PDF Viewer Text Layer Styling */
+.custom-pdf-viewer .textLayer {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  overflow: clip; /* match pdf.js */
+  line-height: 1; /* match pdf.js */
+  text-align: initial;
+  transform-origin: 0 0;
+  z-index: 0; /* pdf.js uses 0, canvas can be below or above as needed */
+  -webkit-text-size-adjust: none;
+  forced-color-adjust: none;
+}
+
+.custom-pdf-viewer .textLayer :is(span, br) {
+  color: transparent !important;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  margin: 0; /* match pdf.js */
+  transform-origin: 0% 0%;
+}
+
+/* Custom PDF Viewer Highlighting */
+.custom-pdf-viewer .textLayer span.highlight {
+  --highlight-bg-color: rgba(255, 204, 0, 0.53);
+  background-color: var(--highlight-bg-color) !important;
+  color: transparent !important;
+  opacity: 1 !important;
+  border-radius: 2px;
+  box-shadow: 0 0 3px rgba(255, 255, 0, 0.8);
+  z-index: 10;
+  position: absolute;
+  margin: -1px; /* match pdf.js highlight box */
+  padding: 1px;
+}
+
+.custom-pdf-viewer .textLayer div {
+  user-select: text;
+  cursor: text;
 }

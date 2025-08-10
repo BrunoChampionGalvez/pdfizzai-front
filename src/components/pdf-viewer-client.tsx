@@ -5,6 +5,9 @@ import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import api from '@/lib/api';
 import PDFViewerManager from '@/lib/pdf-viewer-manager';
 
+// Normalize whitespace: replace non-breaking spaces, collapse all whitespace to single spaces, and trim
+const normalizeSpaces = (s: string): string => s.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+
 interface PdfViewerClientProps {
   pdfUrl: string | null;
   textSnippet?: string;
@@ -94,7 +97,8 @@ export const PdfViewerClient = ({
                 // Extract text for each page in batch
                 for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
                     try {
-                        const text = await doc.loadPageText(pageNum);
+                        const raw = await doc.loadPageText(pageNum);
+                        const text = normalizeSpaces(raw);
                         extractedText += `[START_PAGE]${text}[END_PAGE]`;
                     } catch (error) {
                         console.error(`Error extracting text from page ${pageNum}, retrying...`, error);
@@ -103,8 +107,9 @@ export const PdfViewerClient = ({
                         await new Promise(resolve => setTimeout(resolve, 100));
                         
                         try {
-                            const text = await doc.loadPageText(pageNum);
-                            extractedText += `[START_PAGE]${text}[END_PAGE]`;
+                            const rawRetry = await doc.loadPageText(pageNum);
+                            const retryText = normalizeSpaces(rawRetry);
+                            extractedText += `[START_PAGE]${retryText}[END_PAGE]`;
                         } catch (retryError) {
                             console.error(`Failed to extract text from page ${pageNum} after retry`, retryError);
                             extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
