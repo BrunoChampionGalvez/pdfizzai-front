@@ -878,7 +878,7 @@ export const CustomPdfViewer = ({
   }, [pdfUrl, renderPage, shouldExtractText, paperId, extractTextFromPdf, isInitialized]);
 
   return (
-      <div className="custom-pdf-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%' }}>
+      <div className="custom-pdf-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', minHeight: 0 }}>
       {/* Controls */}
       <div 
         className="pdf-toolbar"
@@ -955,10 +955,12 @@ export const CustomPdfViewer = ({
         <div 
           ref={canvasContainerRef}
           style={{ 
-            flex: 1, 
-            overflow: 'auto', 
-            padding: '20px',
-            backgroundColor: '#f9f9f9'
+            height: '100%',  // Changed from flex: 1 to height: 100%
+            flex: 1, // Take remaining space below toolbar
+            minHeight: 0, // Allow internal scrolling instead of growing the parent
+             overflow: 'auto', 
+             padding: '20px',
+             backgroundColor: '#f9f9f9'
           }}
         />
       )}

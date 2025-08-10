@@ -17,9 +17,9 @@ export default function Dashboard() {
 
   return (
     <div className="h-screen flex flex-col bg-background-primary text-text-primary">
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         <Sidebar />
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-h-0">
           <PDFViewer />
           <ChatPane />
         </div>

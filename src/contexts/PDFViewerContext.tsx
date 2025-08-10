@@ -95,8 +95,21 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
     }
 
     console.log('textSnippet test 2:', textSnippet);
+
+    // If the requested file is already loaded, avoid reloading/remounting the viewer.
+    // Simply update the snippet and ensure the display is shown so the viewer stays mounted.
+    if (state.currentFileId === fileId && state.currentFilePath) {
+      setState(prev => ({
+        ...prev,
+        textSnippet: textSnippet || '',
+        showFileDisplay: true,
+        error: null,
+        // Do NOT set isLoadingFile here to avoid temporarily unmounting the viewer
+      }));
+      return;
+    }
     
-    // First clean up any existing viewers to prevent conflicts
+    // First clean up any existing viewers to prevent conflicts when switching to a different file
     await PDFViewerManager.clearAllViewers();
     
     // Set loading state and show display
@@ -144,7 +157,7 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
         error: error instanceof Error ? error.message : 'Failed to fetch file',
       }));
     }
-  }, []);
+  }, [state.currentFileId, state.currentFilePath]);
 
   const handleHideFileDisplay = useCallback(() => {
     setState(prevState => ({

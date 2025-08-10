@@ -534,8 +534,7 @@ export default function ChatPane() {
   const isSidePanelMode = !!currentReference?.fileId && showFileDisplay;
 
   return (
-    <div 
-      className={`bg-background-chat relative h-full flex flex-col transition-all duration-300 ease-in-out shadow-sm
+    <div className={`bg-background-chat relative h-full flex flex-col min-h-0 overflow-hidden transition-all duration-300 ease-in-out shadow-sm
         ${isSidePanelMode 
           ? (isSidebarCollapsed ? 'w-1/4' : 'w-1/3') // Smaller width when PDF is shown
           : 'w-full max-w-4xl mx-auto px-8'          // Centered with max width when no PDF
@@ -546,14 +545,14 @@ export default function ChatPane() {
           {isNewSession ? 'New Chat' : 'Chat Session'}
         </h2>
       </div>
-
-      <div className={`flex-1 absolute top-0 right-0 left-0 overflow-y-auto p-4 h-full pb-24 pt-18 ${messages.length === 0 && isNewSession && !isSidePanelMode ? 'flex flex-col items-center justify-center' : ''}`}>
-        {messages.length === 0 && isNewSession && !isSidePanelMode ? (
-          <div className="w-full max-w-2xl transition-all duration-500 flex flex-col items-center">
-            <div className="text-center text-text-primary text-4xl font-semibold mb-8">
-              Ask something about your documents
-            </div>
-            <form onSubmit={handleSubmit} className="flex flex-col space-y-4 w-full">
+ 
+      <div className={`flex-1 min-h-0 overflow-y-auto p-4 ${messages.length === 0 && isNewSession && !isSidePanelMode ? 'flex flex-col items-center justify-center' : ''}`}>
+         {messages.length === 0 && isNewSession && !isSidePanelMode ? (
+           <div className="w-full max-w-2xl transition-all duration-500 flex flex-col items-center">
+             <div className="text-center text-text-primary text-4xl font-semibold mb-8">
+               Ask something about your documents
+             </div>
+             <form onSubmit={handleSubmit} className="flex flex-col space-y-4 w-full">
               
               {/* Error message display */}
               {errorMessage && (
