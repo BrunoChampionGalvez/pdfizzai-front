@@ -40,6 +40,7 @@ interface PDFViewerState {
     fileUrl: string | null;
     isExtracting: boolean;
     completed: boolean;
+    error: string | null;
   };
 }
 
@@ -81,7 +82,8 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       fileId: null,
       fileUrl: null,
       isExtracting: false,
-      completed: false
+      completed: false,
+      error: null
     }
   });
 
@@ -229,7 +231,8 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
         extractionState: {
           ...prevState.extractionState,
           isExtracting: false,
-          completed: true
+          completed: true,
+          error: null,
         }
       }));
       
@@ -246,11 +249,12 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       console.log('PDFViewerContext: Text extraction failed');
       setState(prevState => ({
         ...prevState,
-        error: 'Text extraction failed',
+        // Do not set the global viewer error so the PDF remains visible
         extractionState: {
           ...prevState.extractionState,
           isExtracting: false,
-          completed: false
+          completed: false,
+          error: 'Text extraction failed',
         }
       }));
     }
@@ -268,7 +272,8 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
         fileId,
         fileUrl,
         isExtracting: true,
-        completed: false
+        completed: false,
+        error: null,
       }
     }));
   }, []);
@@ -281,6 +286,10 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
     setState(prevState => ({
       ...prevState,
       error: null,
+      extractionState: {
+        ...prevState.extractionState,
+        error: null,
+      },
     }));
   }, []);
 

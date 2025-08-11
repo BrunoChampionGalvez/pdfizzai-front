@@ -12,7 +12,6 @@ import { formatFileSize } from '../lib/utils';
 import { LoadingIcon } from './ChatPane';
 import Modal from './Modal';
 import FileUploader from './FileUploader';
-import api from '../lib/api';
 
 export default function FolderTree() {
   const { folders, files, currentFolderId, setCurrentFolderId, isLoading, addFolder, removeFolder, removeFile, addFile, setFiles } = useFileSystemStore();
@@ -41,7 +40,7 @@ export default function FolderTree() {
 
   // PDF and chat integration
   const { setCurrentReference } = useChatStore();
-  const { handleShowFile, setFileListRefreshHandler, triggerExtraction } = usePDFViewer();
+  const { handleShowFile, setFileListRefreshHandler } = usePDFViewer();
 
 
   // Initialize breadcrumb with root
@@ -207,22 +206,7 @@ export default function FolderTree() {
     // Show the file in the PDF viewer
     await handleShowFile(file.id, '');
     
-    // Check if this is a PDF file that needs extraction
-    if (file.mime_type === 'application/pdf') {
-      try {
-        // Fetch the complete file information to check if extraction is needed
-        const response = await api.get(`/api/files/${file.id}`);
-        const fileDetails = response.data;
-        
-        if (fileDetails && fileDetails.storage_path && !fileDetails.textExtracted) {
-          console.log('PDF file needs extraction, triggering extraction for:', file.id);
-          const fileUrl = `https://storage.googleapis.com/refdoc-ai-bucket/${fileDetails.storage_path}`;
-          triggerExtraction(file.id, fileUrl);
-        }
-      } catch (error) {
-        console.error('Failed to check file extraction status:', error);
-      }
-    }
+    // Note: PDF text extraction is now handled automatically in the backend during upload
   };
 
   const goBack = () => {

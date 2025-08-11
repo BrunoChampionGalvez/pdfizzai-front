@@ -6,9 +6,8 @@ import { useSubscriptionStore } from '../store/subscription';
 import { useAuthStore } from '../store/auth';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { useChatStore } from '../store/chat';
-import { fileSystemService } from '../services/filesystem';
+import { File, fileSystemService } from '../services/filesystem';
 import { subscriptionService } from '../services/subscription';
-import api from '../lib/api';
 import { useToast } from './ToastProvider';
 import { PDFDocument } from 'pdf-lib';
 
@@ -23,10 +22,10 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { currentFolderId, addFile } = useFileSystemStore();
+  const { currentFolderId, addFile, removeFile } = useFileSystemStore();
   const { hasExceededFileLimit, getFilePagesRemaining } = useSubscriptionStore();
   const { user } = useAuthStore();
-  const { triggerExtraction, handleShowFile } = usePDFViewer();
+  const { handleShowFile } = usePDFViewer();
   const { setCurrentReference } = useChatStore();
   const { showError } = useToast();
 
@@ -98,52 +97,55 @@ export default function FileUploader({ folderId, onUploadComplete, isIcon = fals
       // Upload each file
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const uploadedFile = await fileSystemService.uploadFile(
-          file,
-          targetFolderId || undefined
-        );
-        addFile(uploadedFile);
         
-        // Check if this is a PDF file that needs extraction
-        if (file.type === 'application/pdf' && uploadedFile) {
-          console.log('Setting up PDF extraction for:', uploadedFile.id);
-          console.log('Initial uploadedFile storage_path:', uploadedFile.storage_path);
+        // Add a temporary loading file to the store immediately
+        const tempFileId = `temp-${Date.now()}-${i}`;
+        const loadingFile: File = {
+          id: tempFileId,
+          filename: '', // Empty filename to trigger loading state
+          mime_type: file.type,
+          size_bytes: file.size,
+          folder_id: targetFolderId || null,
+          upload_date: new Date().toISOString(),
+          storage_path: '',
+          textExtracted: false,
+          processed: false
+        };
+        addFile(loadingFile);
+        
+        try {
+          const uploadedFile = await fileSystemService.uploadFile(
+            file,
+            targetFolderId || undefined
+          );
           
-          // Set the current reference and show the file in the PDF viewer
-          setCurrentReference({
-            fileId: uploadedFile.id,
-            page: 1,
-            text: ''
-          });
-          
-          // Show the file in the PDF viewer
-          await handleShowFile(uploadedFile.id, '');
-          
-          // Try to construct the file URL - we'll need to fetch the file details to get the storage_path
-          try {
-            // Fetch the complete file information
-            const response = await api.get(`/api/files/${uploadedFile.id}`);
-            const fileDetails = response.data;
-            console.log('Fetched fileDetails:', fileDetails);
-            console.log('Fetched fileDetails.storage_path:', fileDetails.storage_path);
+          // Remove the temporary loading file and add the real file
+          removeFile(tempFileId);
+          addFile(uploadedFile);
+        
+          // Check if this is a PDF file that needs extraction
+          if (file.type === 'application/pdf' && uploadedFile) {
+            console.log('Setting up PDF extraction for:', uploadedFile.id);
+            console.log('Initial uploadedFile storage_path:', uploadedFile.storage_path);
             
-            if (fileDetails && fileDetails.storage_path && !fileDetails.textExtracted) {
-              const fileUrl = `https://storage.googleapis.com/refdoc-ai-bucket/${fileDetails.storage_path}`;
-              
-              // Trigger extraction
-              triggerExtraction(uploadedFile.id, fileUrl);
-              
-              console.log('PDF extraction will begin for:', fileUrl);
-            } else {
-              console.error('File details missing storage_path or already extracted:', {
-                hasFileDetails: !!fileDetails,
-                hasStoragePath: !!fileDetails?.storage_path,
-                textExtracted: fileDetails?.textExtracted
-              });
-            }
-          } catch (error) {
-            console.error('Failed to fetch file details for extraction:', error);
+            // Set the current reference and show the file in the PDF viewer
+            setCurrentReference({
+              fileId: uploadedFile.id,
+              page: 1,
+              text: ''
+            });
+            
+            // Show the file in the PDF viewer
+            await handleShowFile(uploadedFile.id, '');
+            
+            // Note: Text extraction is now handled automatically in the backend during upload
+            console.log('File uploaded successfully. Text extraction completed in backend.');
           }
+        } catch (uploadError) {
+          console.error('Failed to upload file:', uploadError);
+          // Remove the temporary loading file on error
+          removeFile(tempFileId);
+          throw uploadError;
         }
       }
 

@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy, TextItem } from 'pdfjs-dist/types/src/display/api';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/types/src/display/api';
 import { TextLayer, setLayerDimensions } from 'pdfjs-dist/build/pdf.mjs';
-import api from '@/lib/api';
 import PDFViewerManager from '@/lib/pdf-viewer-manager';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { useChatStore } from '../store/chat';
@@ -17,8 +16,6 @@ interface PdfViewerClientProps {
   textSnippet?: string;
   paperId?: string | null;
   shouldExtractText?: boolean;
-  onTextExtractionComplete?: (success: boolean) => void;
-  onTextExtractionProgress?: (progress: number) => void;
 }
 
 interface SearchResult {
@@ -32,14 +29,13 @@ export const CustomPdfViewer = ({
   pdfUrl, 
   textSnippet = '',
   paperId, 
-  shouldExtractText = false,
-  onTextExtractionComplete,
-  onTextExtractionProgress,
+  shouldExtractText = false
 }: PdfViewerClientProps) => {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isExtracting, setIsExtracting] = useState(false);
+  // Remove text extraction state since extraction is handled elsewhere
+  // const [isExtracting, setIsExtracting] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -102,102 +98,59 @@ export const CustomPdfViewer = ({
     setSearchResults([]);
   }, []);
 
-  // Extract text from PDF with batching
-  const extractTextFromPdf = useCallback(async (pdfDoc: PDFDocumentProxy, paperIdToExtract: string) => {
-    if (isExtracting) {
-      console.log('Already extracting text, skipping duplicate call');
-      return;
-    }
-    
+  // Removed local text extraction; handled by PdfExtractor
+
+  // Render text layer using PDF.js TextLayer
+  const renderTextLayer = useCallback(async (page: PDFPageProxy, viewport: unknown, container: HTMLElement, pageNum: number) => {
     try {
-      setIsExtracting(true);
-      console.log('Starting text extraction for document');
-      
-      const totalPages = pdfDoc.numPages;
-      console.log(`Found ${totalPages} pages for extraction`);
-      
-      if (totalPages === 0) {
-        console.error('No pages found in document');
-        setIsExtracting(false);
-        onTextExtractionComplete?.(false);
-        return;
+      // Cancel existing text layer
+      const existingLayer = textLayersRef.current.get(pageNum);
+      if (existingLayer) {
+        existingLayer.cancel?.();
+        textLayersRef.current.delete(pageNum);
       }
       
-      const batchSize = 10;
-      const batches = Math.ceil(totalPages / batchSize);
-      let extractedText: string = '';
-      
-      for (let batch = 0; batch < batches; batch++) {
-        const startPage = batch * batchSize + 1;
-        const endPage = Math.min((batch + 1) * batchSize, totalPages);
-        console.log(`Processing batch ${batch + 1}/${batches}: pages ${startPage}-${endPage}`);
-        
-        for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-          try {
-            const page = await pdfDoc.getPage(pageNum);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items
-              .filter((item): item is TextItem => 'str' in item)
-              .map(item => item.str)
-              .join(' ');
-            
-            extractedText += `[START_PAGE]${pageText}[END_PAGE]`;
-          } catch (error) {
-            console.error(`Error extracting text from page ${pageNum}, retrying...`, error);
-            
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            try {
-              const page = await pdfDoc.getPage(pageNum);
-              const textContent = await page.getTextContent();
-              const pageText = textContent.items
-                .filter((item): item is TextItem => 'str' in item)
-                .map(item => item.str)
-                .join(' ');
-              
-              extractedText += `[START_PAGE]${pageText}[END_PAGE]`;
-            } catch (retryError) {
-              console.error(`Failed to extract text from page ${pageNum} after retry`, retryError);
-              extractedText += `[START_PAGE][EXTRACTION_FAILED][END_PAGE]`;
-            }
-          }
-          
-          const progress = Math.round(((batch * batchSize) + (pageNum - startPage + 1)) / totalPages * 100);
-          onTextExtractionProgress?.(progress);
-        }
+      // Remove existing text layer div
+      const existingTextLayerDiv = container.querySelector('.textLayer');
+      if (existingTextLayerDiv) {
+        existingTextLayerDiv.remove();
       }
       
-      // Send extracted text to backend
-      console.log('Sending extracted text to backend');
+      // Create text layer div with minimal inline styles - let CSS do the heavy lifting
+      const textLayerDiv = document.createElement('div');
+      textLayerDiv.className = 'textLayer';
+      // Only set essential positioning styles - let globals.css handle the rest
+      textLayerDiv.style.position = 'absolute';
+      textLayerDiv.style.inset = '0';
+      textLayerDiv.setAttribute('data-page-num', pageNum.toString());
       
-      try {
-        const response = await api.post(
-          `/api/files/${paperIdToExtract}/save-text`,
-          { 
-            textByPages: extractedText,
-            totalPages,
-          },
-          { 
-            headers: { 'Content-Type': 'application/json' },
-            timeout: 30000
-          }
-        );
-        
-        console.log('Text extraction complete:', response);
-        PDFViewerManager.setActiveExtraction(null);
-        onTextExtractionComplete?.(true);
-      } catch (apiError) {
-        console.error('API error saving extracted text:', apiError);
-        onTextExtractionComplete?.(false);
-        PDFViewerManager.setActiveExtraction(null);
-      }
+      container.appendChild(textLayerDiv);
+      
+      // Set layer dimensions using PDF.js utility after appending to DOM
+      setLayerDimensions(textLayerDiv, viewport);
+      
+      // Get text content stream
+      const textContentSource = await page.getTextContent();
+      
+      // Create PDF.js TextLayer
+      const textLayer = new TextLayer({
+        textContentSource,
+        container: textLayerDiv,
+        viewport
+      });
+      
+      textLayersRef.current.set(pageNum, textLayer);
+      
+      // Render the text layer
+      await textLayer.render();
+      
+      console.log(`[TextLayer] Page ${pageNum}: text layer ready with official PDF.js implementation`);
+      
     } catch (error) {
-      console.error('Error in text extraction process:', error);
-      setIsExtracting(false);
-      onTextExtractionComplete?.(false);
-      PDFViewerManager.setActiveExtraction(null);
+      console.error(`Error rendering text layer for page ${pageNum}:`, error);
     }
-  }, [isExtracting, onTextExtractionComplete, onTextExtractionProgress]);
+  }, []);
+
 
   // Render a specific page with text layer
   const renderPage = useCallback(async (pageNum: number, targetScale?: number) => {
@@ -361,58 +314,7 @@ export const CustomPdfViewer = ({
         console.error(`Error rendering page ${pageNum}:`, error);
       }
     }
-  }, [scale]);
-
-  // Render text layer using PDF.js TextLayer
-  const renderTextLayer = useCallback(async (page: PDFPageProxy, viewport: unknown, container: HTMLElement, pageNum: number) => {
-    try {
-      // Cancel existing text layer
-      const existingLayer = textLayersRef.current.get(pageNum);
-      if (existingLayer) {
-        existingLayer.cancel?.();
-        textLayersRef.current.delete(pageNum);
-      }
-      
-      // Remove existing text layer div
-      const existingTextLayerDiv = container.querySelector('.textLayer');
-      if (existingTextLayerDiv) {
-        existingTextLayerDiv.remove();
-      }
-      
-      // Create text layer div with minimal inline styles - let CSS do the heavy lifting
-      const textLayerDiv = document.createElement('div');
-      textLayerDiv.className = 'textLayer';
-      // Only set essential positioning styles - let globals.css handle the rest
-      textLayerDiv.style.position = 'absolute';
-      textLayerDiv.style.inset = '0';
-      textLayerDiv.setAttribute('data-page-num', pageNum.toString());
-      
-      container.appendChild(textLayerDiv);
-      
-      // Set layer dimensions using PDF.js utility after appending to DOM
-      setLayerDimensions(textLayerDiv, viewport);
-      
-      // Get text content stream
-      const textContentSource = await page.getTextContent();
-      
-      // Create PDF.js TextLayer
-      const textLayer = new TextLayer({
-        textContentSource,
-        container: textLayerDiv,
-        viewport
-      });
-      
-      textLayersRef.current.set(pageNum, textLayer);
-      
-      // Render the text layer
-      await textLayer.render();
-      
-      console.log(`[TextLayer] Page ${pageNum}: text layer ready with official PDF.js implementation`);
-      
-    } catch (error) {
-      console.error(`Error rendering text layer for page ${pageNum}:`, error);
-    }
-  }, []);
+  }, [scale, renderTextLayer]);
 
   // Clear all highlights
   const clearHighlights = useCallback(() => {
@@ -1041,7 +943,6 @@ export const CustomPdfViewer = ({
         
         if (!mountedRef.current) {
           console.log('Component unmounted during PDF loading');
-          PDFViewerManager.releaseInitializationLock();
           initializingRef.current = false;
           return;
         }
@@ -1058,11 +959,7 @@ export const CustomPdfViewer = ({
         
         // Start text extraction if needed
         if (shouldExtractText && paperId) {
-          const activeExtraction = PDFViewerManager.getActiveExtraction();
-          if (!activeExtraction || activeExtraction !== paperId) {
-            PDFViewerManager.setActiveExtraction(paperId);
-            extractTextFromPdf(pdf, paperId);
-          }
+          console.log('Text extraction will be handled by PdfExtractor component');
         }
         
         PDFViewerManager.releaseInitializationLock();
@@ -1078,7 +975,7 @@ export const CustomPdfViewer = ({
     };
     
     initializePdf();
-  }, [pdfUrl, renderPage, shouldExtractText, paperId, extractTextFromPdf, isInitialized]);
+  }, [pdfUrl, renderPage, isInitialized, paperId, shouldExtractText]);
 
   return (
       <div className="custom-pdf-viewer" style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', minHeight: 0 }}>
