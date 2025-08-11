@@ -12,7 +12,7 @@ import { subscriptionService } from '../services/subscription';
 import { generateId } from '../lib/utils';
 import MessageBubble from './MessageBubble';
 import { MentionedMaterial, StudyMaterial } from '../types/chat';
-import { useRouter } from 'next/navigation';
+// import { useRouter } from 'next/navigation'; // Commented out as it's not used
 import { extractErrorMessage, isAuthError } from '../types/errors';
 
 export default function ChatPane() {
@@ -45,7 +45,7 @@ export default function ChatPane() {
   const { showFileDisplay } = usePDFViewer();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
-  const router = useRouter();
+  // const router = useRouter(); // Commented out as it's not used
   
   // @ functionality state
   const [showMentionSearch, setShowMentionSearch] = useState(false);
@@ -98,7 +98,7 @@ export default function ChatPane() {
     };
 
     loadChatHistory();
-  }, [currentSessionId, setMessages, setLoading, router, sessionJustCreated]);
+  }, [currentSessionId, sessionJustCreated, setLoading, setMessages]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -502,8 +502,16 @@ export default function ChatPane() {
           
           // Refresh message usage after successful message sending
           if (user?.id && accumulatedContent) {
-            await subscriptionService.refreshMessageUsage(user.id);
+            try {
+              await subscriptionService.refreshMessageUsage(user.id);
+            } catch (refreshError) {
+              console.error('Failed to refresh message usage:', refreshError);
+              // Don't block the rest of the flow for this error
+            }
           }
+
+          // Remove forced history refresh to prevent race condition
+          // The UI already reflects the latest state from streaming
         }
       };
       
@@ -540,12 +548,6 @@ export default function ChatPane() {
           : 'w-full max-w-4xl mx-auto px-8'          // Centered with max width when no PDF
         } ${mounted ? 'opacity-100' : 'opacity-0'}`}
     >
-      <div className={`flex justify-between items-center pb-4 mt-6 ${isSidePanelMode ? 'ml-4' : ''}`}>
-        <h2 className="text-lg font-medium text-text-primary">
-          {isNewSession ? 'New Chat' : 'Chat Session'}
-        </h2>
-      </div>
- 
       <div className={`flex-1 min-h-0 overflow-y-auto p-4 ${messages.length === 0 && isNewSession && !isSidePanelMode ? 'flex flex-col items-center justify-center' : ''}`}>
          {messages.length === 0 && isNewSession && !isSidePanelMode ? (
            <div className="w-full max-w-2xl transition-all duration-500 flex flex-col items-center">

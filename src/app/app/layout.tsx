@@ -23,17 +23,24 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         setLoading(true);
         const currentUser = await authService.getMe();
         
-        // Check if the user has changed (different user logged in)
-        if (previousUserIdRef.current && previousUserIdRef.current !== currentUser.id) {
-          console.log('User changed, clearing chat state');
+        // Only clear chat state if the user ID actually changed (not on first load)
+        // and if we had a previous user (to prevent clearing on page refresh)
+        if (previousUserIdRef.current && 
+            previousUserIdRef.current !== currentUser.id && 
+            previousUserIdRef.current !== null) {
+          console.log('User changed from', previousUserIdRef.current, 'to', currentUser.id, ', clearing chat state');
           clearAll(); // Clear all chat state when user changes
         }
         
-        previousUserIdRef.current = currentUser.id;
-        setUser(currentUser);
+        // Only update the ref if it's actually different or first time
+        if (previousUserIdRef.current !== currentUser.id) {
+          previousUserIdRef.current = currentUser.id;
+          setUser(currentUser);
+        }
       } catch {
         // User logged out or session expired
-        if (previousUserIdRef.current) {
+        const hadPreviousUser = previousUserIdRef.current !== null;
+        if (hadPreviousUser) {
           console.log('User logged out, clearing chat state');
           clearAll(); // Clear chat state on logout
         }

@@ -323,7 +323,7 @@ export const PdfExtractor = ({
           
           return success;
           
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (abortController.signal.aborted) {
             console.log('[PDF Extractor] Extraction aborted during process');
             globalExtractionState.globalLock = false;
@@ -333,7 +333,7 @@ export const PdfExtractor = ({
           console.error('[PDF Extractor] Error during PDF extraction:', err);
           
           if (mountedRef.current) {
-            setError(`Failed to extract text: ${err?.message || 'Unknown error'}`);
+            setError(`Failed to extract text: ${err instanceof Error ? err.message : 'Unknown error'}`);
             extractionStatusRef.current = 'failed';
             onExtractionComplete(false);
           }

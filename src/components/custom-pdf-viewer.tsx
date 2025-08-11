@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useId } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import type { PDFDocumentProxy, PDFPageProxy, TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api';
-// @ts-ignore: No type declarations available for this module
+import type { PDFDocumentProxy, PDFPageProxy, TextItem } from 'pdfjs-dist/types/src/display/api';
 import { TextLayer, setLayerDimensions } from 'pdfjs-dist/build/pdf.mjs';
 import api from '@/lib/api';
 import PDFViewerManager from '@/lib/pdf-viewer-manager';
@@ -45,11 +44,14 @@ export const CustomPdfViewer = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1.0);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]); // eslint-disable-line @typescript-eslint/no-unused-vars
+  // Manual search state
+  const [manualSearchQuery, setManualSearchQuery] = useState('');
+  const [currentSearchResultIndex, setCurrentSearchResultIndex] = useState(-1);
+  const [allMatches, setAllMatches] = useState<Array<{pageNum: number, text: string}>>([]);
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
-  const renderTasksRef = useRef<Map<number, any>>(new Map());
-  const textLayersRef = useRef<Map<number, any>>(new Map());
+  const renderTasksRef = useRef<Map<number, { cancel: () => void; promise: Promise<unknown> }>>(new Map());
+  const textLayersRef = useRef<Map<number, { cancel?: () => void }>>(new Map());
   const mountedRef = useRef<boolean>(true);
   const uniqueId = useId();
   const elementId = useRef(`pdf-viewer-${paperId || 'doc'}-${uniqueId}-${Date.now()}`);
@@ -73,7 +75,7 @@ export const CustomPdfViewer = ({
     // Cancel text layers
     textLayersRef.current.forEach((layer, pageNum) => {
       try {
-        layer.cancel();
+        layer.cancel?.();
       } catch (err) {
         console.error(`Error canceling text layer for page ${pageNum}:`, err);
       }
@@ -218,7 +220,7 @@ export const CustomPdfViewer = ({
         // Wait for the previous task to finish cancelling to avoid canvas reuse
         try {
           await existingTask.promise;
-        } catch (_) {
+        } catch {
           // Expected rejection when cancelled; ignore
         }
         renderTasksRef.current.delete(pageNum);
@@ -254,7 +256,7 @@ export const CustomPdfViewer = ({
       // Based on official PDF.js implementation found in pdf.mjs:setLayerDimensions
       pageContainer.style.setProperty('--total-scale-factor', currentScale.toString());
       pageContainer.style.setProperty('--scale-factor', currentScale.toString());
-      pageContainer.style.setProperty('--user-unit', String((viewport as any)?.rawDims?.userUnit ?? 1));
+      pageContainer.style.setProperty('--user-unit', String((viewport as { rawDims?: { userUnit?: number } })?.rawDims?.userUnit ?? 1));
       pageContainer.style.setProperty('--scale-round-x', '1px');
       pageContainer.style.setProperty('--scale-round-y', '1px');
       
@@ -267,11 +269,11 @@ export const CustomPdfViewer = ({
       pageContainer.style.setProperty('--text-layer-overflow', 'clip');
       
       // Store any existing highlights before clearing canvas
-      let existingHighlights: Array<{selector: string, styles: Record<string, string>}> = [];
+      const existingHighlights: Array<{selector: string, styles: Record<string, string>}> = [];
       const textLayer = pageContainer.querySelector('.textLayer') as HTMLElement;
       if (textLayer) {
         const highlightedSpans = textLayer.querySelectorAll('span.highlight');
-        highlightedSpans.forEach((span, index) => {
+        highlightedSpans.forEach((span) => {
           const htmlSpan = span as HTMLElement;
           existingHighlights.push({
             selector: `span:nth-child(${Array.from(textLayer.children).indexOf(span) + 1})`,
@@ -311,8 +313,8 @@ export const CustomPdfViewer = ({
       if (!context) return;
       
       // Reset any existing transform before applying device pixel ratio scaling
-      if (typeof (context as any).setTransform === 'function') {
-        (context as any).setTransform(1, 0, 0, 1, 0, 0);
+      if (typeof (context as CanvasRenderingContext2D & { setTransform?: (a: number, b: number, c: number, d: number, e: number, f: number) => void }).setTransform === 'function') {
+        (context as CanvasRenderingContext2D & { setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => void }).setTransform(1, 0, 0, 1, 0, 0);
       }
       
       // Set canvas pixel dimensions to match scaled viewport for crisp rendering
@@ -354,15 +356,15 @@ export const CustomPdfViewer = ({
         }, 50);
       }
       
-    } catch (error: any) {
-      if (error.name !== 'RenderingCancelledException') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name !== 'RenderingCancelledException') {
         console.error(`Error rendering page ${pageNum}:`, error);
       }
     }
   }, [scale]);
 
   // Render text layer using PDF.js TextLayer
-  const renderTextLayer = useCallback(async (page: PDFPageProxy, viewport: any, container: HTMLElement, pageNum: number) => {
+  const renderTextLayer = useCallback(async (page: PDFPageProxy, viewport: unknown, container: HTMLElement, pageNum: number) => {
     try {
       // Cancel existing text layer
       const existingLayer = textLayersRef.current.get(pageNum);
@@ -427,152 +429,168 @@ export const CustomPdfViewer = ({
     });
   }, []);
 
-  // Helper: collapse whitespace and build a mapping from normalized indices to original indices
-  const normalizeSpaces = useCallback((s: string) => s.replace(/\s+/g, ' ').trim(), []);
-  const buildNormalizedWithMap = useCallback((s: string) => {
+  // Enhanced text normalization with comprehensive mapping (commented out as not used)
+  // const buildNormalizedWithMap = useCallback((s: string) => {
+  //   let normalized = '';
+  //   const map: number[] = [];
+  //   let i = 0;
+  //   let inWS = false;
+  //   for (; i < s.length; i++) {
+  //     const ch = s[i];
+  //     if (/\s/.test(ch)) {
+  //       if (!inWS) {
+  //         if (normalized.length > 0) {
+  //           normalized += ' ';
+  //           map.push(i);
+  //         }
+  //         inWS = true;
+  //       }
+  //     } else {
+  //       normalized += ch;
+  //       map.push(i);
+  //       inWS = false;
+  //     }
+  //   }
+  //   // Trim any trailing space we might have added at the end
+  //   if (normalized.endsWith(' ')) {
+  //     normalized = normalized.slice(0, -1);
+  //     map.pop();
+  //   }
+  //   return { normalized, map };
+  // }, []);
+
+  // Comprehensive text normalization for robust matching
+  const normalizeTextRobust = useCallback((text: string) => {
+    return text
+      // Unicode normalization
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      // Handle non-breaking spaces and special whitespace
+      .replace(/[\u00A0\u2000-\u200B\u2028\u2029]/g, ' ')
+      // Collapse whitespace
+      .replace(/\s+/g, ' ')
+      // Fix punctuation spacing
+      .replace(/\s+([.,:;!?])/g, '$1')
+      // Handle hyphenated words at line breaks
+      .replace(/-\s+/g, '-')
+      // Remove extra hyphens after numbers
+      .replace(/(\d)-+/g, '$1')
+      .trim();
+  }, []);
+
+  // Build comprehensive normalized text with mapping for precise highlighting
+  const buildRobustNormalizedWithMap = useCallback((text: string) => {
     let normalized = '';
     const map: number[] = [];
+    
+    // First pass: Unicode normalization and special character handling
+    const unicodeNormalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    
     let i = 0;
-    let inWS = false;
-    for (; i < s.length; i++) {
-      const ch = s[i];
-      if (/\s/.test(ch)) {
-        if (!inWS) {
-          if (normalized.length > 0) {
-            normalized += ' ';
-            map.push(i);
+    let inWhitespace = false;
+    
+    for (i = 0; i < unicodeNormalized.length; i++) {
+      const char = unicodeNormalized[i];
+      
+      // Handle various whitespace characters
+      if (/[\s\u00A0\u2000-\u200B\u2028\u2029]/.test(char)) {
+        if (!inWhitespace && normalized.length > 0) {
+          // Look ahead to handle hyphenated words
+          let j = i + 1;
+          while (j < unicodeNormalized.length && /\s/.test(unicodeNormalized[j])) {
+            j++;
           }
-          inWS = true;
+          
+          // Check if previous character was a hyphen
+          if (normalized.endsWith('-')) {
+            // Don't add space after hyphen (line break hyphenation)
+            inWhitespace = true;
+            continue;
+          }
+          
+          normalized += ' ';
+          map.push(i);
+          inWhitespace = true;
         }
-      } else {
-        normalized += ch;
+      } 
+      // Handle punctuation spacing
+      else if (/[.,:;!?]/.test(char)) {
+        // Remove space before punctuation if it exists
+        if (normalized.endsWith(' ')) {
+          normalized = normalized.slice(0, -1);
+          map.pop();
+        }
+        normalized += char;
         map.push(i);
-        inWS = false;
+        inWhitespace = false;
+      }
+      // Handle hyphens after numbers
+      else if (char === '-' && normalized.length > 0 && /\d/.test(normalized[normalized.length - 1])) {
+        // Look ahead for multiple hyphens
+        let j = i + 1;
+        while (j < unicodeNormalized.length && unicodeNormalized[j] === '-') {
+          j++;
+        }
+        // Only keep the number, skip all hyphens
+        i = j - 1; // Will be incremented by loop
+        inWhitespace = false;
+      }
+      // Regular characters
+      else {
+        normalized += char;
+        map.push(i);
+        inWhitespace = false;
       }
     }
-    // Trim any trailing space we might have added at the end
-    if (normalized.endsWith(' ')) {
-      normalized = normalized.slice(0, -1);
-      map.pop();
-    }
+    
+    // Final cleanup
+    normalized = normalized.trim();
+    
     return { normalized, map };
   }, []);
 
-  // Search for text in the PDF
-  const searchText = useCallback(async (searchQuery: string) => {
-    if (!pdfDocRef.current || !searchQuery.trim()) {
-      setSearchResults([]);
-      clearHighlights();
-      return;
-    }
-
-    console.log('[Search] searchText called', {
-      raw: searchQuery,
-      length: searchQuery.length,
-    });
-
-    const diagQueryA = searchQuery.replace(/(?<!-)[\r\n]+/g, ' ').replace(/-\s+/g, '-');
-    const diagQueryB = diagQueryA.replace(/(\d)-+/g, '$1');
-    const diagQueryC = diagQueryB.replace(/\s+/g, ' ').trim();
-    console.log('[Search] normalized query candidates', {
-      A_joinNewlines_keepHyphen: diagQueryA,
-      B_removeExtraHyphensAfterDigits: diagQueryB,
-      C_collapseWhitespace: diagQueryC,
-      lower_trim: diagQueryC.toLowerCase(),
+  // Create tolerant search patterns for fallback matching
+  const createTolerancePatterns = useCallback((query: string) => {
+    const patterns = [];
+    
+    // Level 1: Strict normalized
+    patterns.push({
+      pattern: normalizeTextRobust(query).toLowerCase(),
+      tolerance: 'strict'
     });
     
-    // Clear existing highlights
-    clearHighlights();
+    // Level 2: Punctuation/whitespace tolerant
+    const punctuationTolerant = normalizeTextRobust(query)
+      .replace(/[.,:;!?]/g, '\\s*[.,:;!?]?\\s*')
+      .replace(/\s+/g, '\\s+')
+      .toLowerCase();
+    patterns.push({
+      pattern: punctuationTolerant,
+      tolerance: 'punctuation',
+      isRegex: true
+    });
     
-    const results: SearchResult[] = [];
-    const queryLower = searchQuery.toLowerCase().trim();
-    const queryNormalizedLower = normalizeSpaces(searchQuery).toLowerCase();
+    // Level 3: Hyphen relaxed
+    const hyphenRelaxed = normalizeTextRobust(query)
+      .replace(/-/g, '-?\\s*')
+      .replace(/\s+/g, '\\s+')
+      .toLowerCase();
+    patterns.push({
+      pattern: hyphenRelaxed,
+      tolerance: 'hyphen',
+      isRegex: true
+    });
     
-    try {
-      // Search through all pages
-      const pagesToSearch = pdfDocRef.current.numPages;
-      console.log(`[Search] Will search ${pagesToSearch} pages`);
-      
-      for (let pageNum = 1; pageNum <= pagesToSearch; pageNum++) {
-        console.log(`[Search] Processing page ${pageNum}`);
-        const page = await pdfDocRef.current.getPage(pageNum);
-        const textContent = await page.getTextContent();
-        console.log(`[Search] Page ${pageNum}: got ${textContent.items.length} items`);
-        
-        // Build the complete page text and track character positions
-        let pageText = '';
-        const textItems: Array<{ item: TextItem; startIndex: number; endIndex: number }> = [];
-        
-        textContent.items.forEach((item) => {
-          if ('str' in item) {
-            const startIndex = pageText.length;
-            pageText += item.str;
-            const endIndex = pageText.length;
-            textItems.push({ item, startIndex, endIndex });
-            
-            // Add space if this item doesn't end with whitespace and next item doesn't start with whitespace
-            if (item.str && !item.str.match(/\s$/)) {
-              pageText += ' ';
-            }
-          }
-        });
-        console.log(`[Search] Page ${pageNum}: built pageText length ${pageText.length}`);
-        
-        const pageTextLower = pageText.toLowerCase();
-        const { normalized: pageTextNormalized, map } = buildNormalizedWithMap(pageText);
-        const pageTextNormalizedLower = pageTextNormalized.toLowerCase();
-        
-        console.log(`[Search] Page ${pageNum}: normalized pageText length ${pageTextNormalized.length}`);
-        
-        // Look for matches in normalized text first
-        const normalizedMatch = pageTextNormalizedLower.indexOf(queryNormalizedLower);
-        if (normalizedMatch !== -1) {
-          console.log(`[Search] Page ${pageNum}: found normalized match at position ${normalizedMatch}`);
-          results.push({
-            pageIndex: pageNum - 1,
-            textIndex: normalizedMatch,
-            rect: new DOMRect(),
-            text: queryNormalizedLower
+    // Level 4: Letters and digits only (most permissive)
+        const lettersDigitsOnly = query.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        if (lettersDigitsOnly.length > 3) { // Only for reasonable length queries
+          patterns.push({
+            pattern: lettersDigitsOnly,
+            tolerance: 'letters_digits' as const
           });
-          
-          // Render the page first
-          await renderPage(pageNum, scale);
-          
-          // Then highlight the text
-          await highlightTextInPage(pageNum, queryNormalizedLower);
-          break; // Only highlight the first match for now
         }
-        
-        // Fallback to direct match
-        const directMatch = pageTextLower.indexOf(queryLower);
-        if (directMatch !== -1) {
-          console.log(`[Search] Page ${pageNum}: found direct match at position ${directMatch}`);
-          results.push({
-            pageIndex: pageNum - 1,
-            textIndex: directMatch,
-            rect: new DOMRect(),
-            text: queryLower
-          });
-          
-          // Render the page first
-          await renderPage(pageNum, scale);
-          
-          // Then highlight the text
-          await highlightTextInPage(pageNum, queryLower);
-          break; // Only highlight the first match for now
-        }
-      }
-      
-      if (results.length === 0) {
-        console.log('[Search] No matches found');
-      }
-      
-      setSearchResults(results);
-      
-    } catch (error) {
-      console.error('Error searching text:', error);
-    }
-  }, [pdfDocRef, clearHighlights, renderPage, scale, normalizeSpaces, buildNormalizedWithMap]);
+    
+    return patterns;
+  }, [normalizeTextRobust]);
 
   // Highlight text in specific page
   const highlightTextInPage = useCallback(async (pageNum: number, searchQuery: string) => {
@@ -605,7 +623,7 @@ export const CustomPdfViewer = ({
     }
     
     const queryLowerRaw = searchQuery.toLowerCase().trim();
-    const queryLowerNorm = normalizeSpaces(queryLowerRaw);
+    const patterns = createTolerancePatterns(searchQuery);
     
     // Build a combined text from spans with smart space insertion, and segment map
     let combined = '';
@@ -625,25 +643,50 @@ export const CustomPdfViewer = ({
     }
     
     const combinedLower = combined.toLowerCase();
-    const { normalized: combinedNorm, map } = buildNormalizedWithMap(combinedLower);
-    const combinedNormLower = combinedNorm; // already lowered
+    const { normalized: combinedNormLower, map } = buildRobustNormalizedWithMap(combinedLower);
     
-    let normIdx = combinedNormLower.indexOf(queryLowerNorm);
     let matchStartOriginal = -1;
     let matchEndOriginal = -1;
-    
-    if (normIdx !== -1) {
-      // Map normalized index range back to original combined indices
-      const normEndIdx = normIdx + queryLowerNorm.length - 1;
-      matchStartOriginal = map[normIdx] ?? -1;
-      const endMapped = map[normEndIdx];
-      matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
-    } else {
-      // Fallback: try direct search without normalization
+
+    // 1) Strict normalized search
+    const strictPat = patterns.find(p => p.tolerance === 'strict');
+    if (strictPat) {
+      const normIdx = combinedNormLower.indexOf(strictPat.pattern as string);
+      if (normIdx !== -1) {
+        const normEndIdx = normIdx + (strictPat.pattern as string).length - 1;
+        matchStartOriginal = map[normIdx] ?? -1;
+        const endMapped = map[normEndIdx];
+        matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
+      }
+    }
+
+    // 2) Direct search on combined lower if not found
+    if (matchStartOriginal === -1) {
       const directIdx = combinedLower.indexOf(queryLowerRaw);
       if (directIdx !== -1) {
         matchStartOriginal = directIdx;
         matchEndOriginal = directIdx + queryLowerRaw.length;
+      }
+    }
+
+    // 3) Tolerant regex on normalized combined if still not found
+    if (matchStartOriginal === -1) {
+      const tolerantPatterns = patterns.filter(p => (p as { isRegex?: boolean }).isRegex);
+      for (const tolerantPat of tolerantPatterns) {
+        try {
+          const re = new RegExp(tolerantPat.pattern as string);
+          const m = combinedNormLower.match(re);
+          if (m && m.index !== undefined) {
+            const normIdx = m.index;
+            const normEndIdx = normIdx + m[0].length - 1;
+            matchStartOriginal = map[normIdx] ?? -1;
+            const endMapped = map[normEndIdx];
+            matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
+            break;
+          }
+        } catch (e) {
+          console.warn('[Highlight] Regex compilation failed for tolerant pattern', tolerantPat, e);
+        }
       }
     }
     
@@ -669,9 +712,169 @@ export const CustomPdfViewer = ({
         }, 150);
       }
     } else {
-      console.log(`[Highlight] No match found for "${queryLowerRaw}" after normalization on page ${pageNum}`);
+      console.log(`[Highlight] No match found for "${queryLowerRaw}" after robust matching on page ${pageNum}`);
     }
-  }, [normalizeSpaces, buildNormalizedWithMap]);
+  }, [buildRobustNormalizedWithMap, createTolerancePatterns]);
+
+  // Search for text in all pages
+  const searchText = useCallback(async (searchQuery: string) => {
+    if (!pdfDocRef.current || !searchQuery.trim()) {
+      setSearchResults([]);
+      setAllMatches([]);
+      setCurrentSearchResultIndex(-1);
+      clearHighlights();
+      return;
+    }
+
+    console.log('[Search] searchText called', {
+      raw: searchQuery,
+      length: searchQuery.length,
+    });
+
+    // Clear existing highlights
+    clearHighlights();
+    
+    const results: SearchResult[] = [];
+    const matches: Array<{pageNum: number, text: string}> = [];
+    const patterns = createTolerancePatterns(searchQuery);
+
+    try {
+      // Search through all pages
+      const pagesToSearch = pdfDocRef.current.numPages;
+      console.log(`[Search] Will search ${pagesToSearch} pages`);
+      
+      for (let pageNum = 1; pageNum <= pagesToSearch; pageNum++) {
+        console.log(`[Search] Processing page ${pageNum}`);
+        const page = await pdfDocRef.current.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        console.log(`[Search] Page ${pageNum}: got ${textContent.items.length} items`);
+        
+        // Build the complete page text and track character positions
+        let pageText = '';
+        textContent.items.forEach((item) => {
+          if ('str' in item) {
+            pageText += item.str;
+            // Add space if this item doesn't end with whitespace and next item doesn't start with whitespace
+            if (item.str && !item.str.match(/\s$/)) {
+              pageText += ' ';
+            }
+          }
+        });
+        console.log(`[Search] Page ${pageNum}: built pageText length ${pageText.length}`);
+        
+        const pageTextLower = pageText.toLowerCase();
+        const { normalized: pageTextRobustNormLower } = buildRobustNormalizedWithMap(pageTextLower);
+        
+        let pageHasMatch = false;
+        
+        // Try strict normalized first
+        const strict = patterns.find(p => p.tolerance === 'strict');
+        if (strict && pageTextRobustNormLower.indexOf(strict.pattern as string) !== -1) {
+          console.log(`[Search] Page ${pageNum}: strict normalized match`);
+          results.push({
+            pageIndex: pageNum - 1,
+            textIndex: pageTextRobustNormLower.indexOf(strict.pattern as string),
+            rect: new DOMRect(),
+            text: strict.pattern as string
+          });
+          matches.push({ pageNum, text: strict.pattern as string });
+          pageHasMatch = true;
+        }
+
+        // Fallback: direct search on raw lowered text
+        if (!pageHasMatch) {
+          const directIdx = pageTextLower.indexOf(normalizeTextRobust(searchQuery).toLowerCase());
+          if (directIdx !== -1) {
+            console.log(`[Search] Page ${pageNum}: direct match on lowered text`);
+            results.push({
+              pageIndex: pageNum - 1,
+              textIndex: directIdx,
+              rect: new DOMRect(),
+              text: searchQuery
+            });
+            matches.push({ pageNum, text: searchQuery });
+            pageHasMatch = true;
+          }
+        }
+
+        // Tolerant regex patterns against robust normalized text
+        if (!pageHasMatch) {
+          const tolerantPatterns = patterns.filter(p => (p as { isRegex?: boolean }).isRegex);
+          for (const tolerant of tolerantPatterns) {
+            try {
+              const re = new RegExp(tolerant.pattern as string);
+              const m = pageTextRobustNormLower.match(re);
+              if (m && m.index !== undefined) {
+                console.log(`[Search] Page ${pageNum}: tolerant regex (${tolerant.tolerance}) match`);
+                results.push({
+                  pageIndex: pageNum - 1,
+                  textIndex: m.index,
+                  rect: new DOMRect(),
+                  text: m[0]
+                });
+                matches.push({ pageNum, text: m[0] });
+                pageHasMatch = true;
+                break;
+              }
+            } catch (e) {
+              console.warn('[Search] Regex compilation failed for tolerant pattern', tolerant, e);
+            }
+          }
+        }
+
+        // Extreme fallback: letters/digits only
+        if (!pageHasMatch) {
+          const lettersDigits = patterns.find(p => p.tolerance === 'letters_digits');
+          if (lettersDigits) {
+            const pageLettersDigitsOnly = pageTextLower.replace(/[^a-z0-9]/g, '');
+            if (pageLettersDigitsOnly.indexOf(lettersDigits.pattern as string) !== -1) {
+              console.log(`[Search] Page ${pageNum}: letters/digits-only fallback match`);
+              results.push({
+                pageIndex: pageNum - 1,
+                textIndex: 0,
+                rect: new DOMRect(),
+                text: lettersDigits.pattern as string
+              });
+              matches.push({ pageNum, text: lettersDigits.pattern as string });
+              pageHasMatch = true;
+            }
+          }
+        }
+      }
+      
+      if (results.length === 0) {
+        console.log('[Search] No matches found');
+      } else {
+        console.log(`[Search] Found ${matches.length} matches across ${results.length} pages`);
+        // Render and highlight the first match
+        if (matches.length > 0) {
+          const firstMatch = matches[0];
+          await renderPage(firstMatch.pageNum, scale);
+          await highlightTextInPage(firstMatch.pageNum, searchQuery);
+          setCurrentSearchResultIndex(0);
+        }
+      }
+      
+      setSearchResults(results);
+      setAllMatches(matches);
+      
+    } catch (error) {
+      console.error('Error searching text:', error);
+    }
+  }, [pdfDocRef, clearHighlights, renderPage, scale, createTolerancePatterns, buildRobustNormalizedWithMap, normalizeTextRobust, highlightTextInPage]);
+
+  // Navigate to next search result
+  const goToNextMatch = useCallback(async () => {
+    if (allMatches.length === 0 || !manualSearchQuery.trim()) return;
+    
+    const nextIndex = (currentSearchResultIndex + 1) % allMatches.length;
+    const nextMatch = allMatches[nextIndex];
+    
+    setCurrentSearchResultIndex(nextIndex);
+    clearHighlights();
+    await renderPage(nextMatch.pageNum, scale);
+    await highlightTextInPage(nextMatch.pageNum, manualSearchQuery);
+  }, [allMatches, currentSearchResultIndex, manualSearchQuery, clearHighlights, renderPage, scale, highlightTextInPage]);
 
   // Scroll to a specific page
   const scrollToPage = useCallback((pageNum: number) => {
@@ -720,14 +923,14 @@ export const CustomPdfViewer = ({
     }
   }, []);
 
-  // Zoom controls
-  const zoomIn = useCallback(() => {
-    setScale(prev => Math.min(3.0, prev + 0.25));
-  }, []);
+  // Zoom controls (commented out as they're not used)
+  // const zoomIn = useCallback(() => {
+  //   setScale(prev => Math.min(3.0, prev + 0.25));
+  // }, []);
 
-  const zoomOut = useCallback(() => {
-    setScale(prev => Math.max(0.1, prev - 0.25));
-  }, []);
+  // const zoomOut = useCallback(() => {
+  //   setScale(prev => Math.max(0.1, prev - 0.25));
+  // }, []);
 
   // Navigation controls
   const goToNextPage = useCallback(() => {
@@ -736,7 +939,7 @@ export const CustomPdfViewer = ({
       setCurrentPage(nextPage);
       scrollToPage(nextPage);
     }
-  }, [currentPage, totalPages]);
+  }, [currentPage, totalPages, scrollToPage]);
 
   const goToPrevPage = useCallback(() => {
     if (currentPage > 1) {
@@ -744,7 +947,7 @@ export const CustomPdfViewer = ({
       setCurrentPage(prevPage);
       scrollToPage(prevPage);
     }
-  }, [currentPage]);
+  }, [currentPage, scrollToPage]);
 
   // Re-render all pages when scale changes
   useEffect(() => {
@@ -864,9 +1067,9 @@ export const CustomPdfViewer = ({
         
         PDFViewerManager.releaseInitializationLock();
         
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Error loading PDF:', error);
-        setError(`Error loading PDF: ${error.message}`);
+        setError(`Error loading PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
         setIsLoading(false);
         PDFViewerManager.releaseInitializationLock();
       }
@@ -894,22 +1097,103 @@ export const CustomPdfViewer = ({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0px' }}>
             <button 
               onClick={goToPrevPage} 
               disabled={currentPage <= 1}
-              className="px-2 py-1 rounded-md bg-[var(--color-secondary-50)] text-[var(--color-primary)] hover:bg-[var(--color-secondary-200)] disabled:opacity-50 transition-colors"
+              className="py-1 rounded-md text-accent hover:text-accent-300  cursor-pointer transition-colors inline-flex items-center gap-1"
             >
-              ← Prev
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M19 12H5m7 7l-7-7 7-7"/>
+              </svg>
             </button>
             <span className="text-[var(--color-text-primary)] min-w-[60px] text-center">{currentPage} / {totalPages}</span>
             <button 
               onClick={goToNextPage} 
               disabled={currentPage >= totalPages}
-              className="px-2 py-1 rounded-md bg-[var(--color-secondary-50)] text-[var(--color-primary)] hover:bg-[var(--color-secondary-200)] disabled:opacity-50 transition-colors"
+              className="py-1 rounded-md text-accent hover:text-accent-300  cursor-pointer transition-colors inline-flex items-center gap-1"
             >
-              Next →
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14m-7-7l7 7-7 7"/>
+              </svg>
             </button>
+          </div>
+          {/* Manual search input */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '24px' }}>
+            <input 
+              type="text"
+              value={manualSearchQuery}
+              onChange={(e) => setManualSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const q = manualSearchQuery.trim();
+                  if (q) {
+                    searchText(q);
+                  }
+                }
+              }}
+              placeholder="Search in PDF..."
+              className="px-2 py-1 rounded-md border border-accent bg-[var(--color-primary)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] min-w-[220px]"
+            />
+            <button 
+              onClick={() => {
+                const q = manualSearchQuery.trim();
+                if (q) {
+                  searchText(q);
+                }
+              }}
+              className="px-2 py-1 rounded-md bg-[var(--color-primary)]
+              hover:bg- text-accent inline-flex items-center gap-1 cursor-pointer hover:text-accent-300"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+            <button
+              onClick={goToNextMatch}
+              disabled={allMatches.length === 0}
+              className="px-2 py-1 rounded-md bg-[var(--color-primary)]
+              hover:bg- text-accent inline-flex items-center gap-1 cursor-pointer hover:text-accent-300"
+              title="Next match"
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="16" 
+                height="16" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14m-7-7l7 7-7 7"/>
+              </svg>
+            </button>
+
           </div>
         </div>
         
