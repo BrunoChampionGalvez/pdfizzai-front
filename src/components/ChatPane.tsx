@@ -98,7 +98,7 @@ export default function ChatPane() {
     };
 
     loadChatHistory();
-  }, [currentSessionId, sessionJustCreated, setLoading, setMessages]);
+  }, [currentSessionId, sessionJustCreated, setLoading]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
