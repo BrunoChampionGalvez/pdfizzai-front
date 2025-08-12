@@ -38,6 +38,7 @@ export const CustomPdfViewer = ({
   // const [isExtracting, setIsExtracting] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageInputValue, setPageInputValue] = useState('1');
   const [totalPages, setTotalPages] = useState(0);
   const [scale, setScale] = useState(1.0);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]); // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -834,6 +835,12 @@ export const CustomPdfViewer = ({
   //   setScale(prev => Math.max(0.1, prev - 0.25));
   // }, []);
 
+  const jumpToPage = useCallback((pageNum: number) => {
+    if (pageNum < 1 || pageNum > totalPages) return;
+    setCurrentPage(pageNum);
+    scrollToPage(pageNum);
+  }, [totalPages, scrollToPage]);
+
   // Navigation controls
   const goToNextPage = useCallback(() => {
     if (currentPage < totalPages) {
@@ -850,6 +857,11 @@ export const CustomPdfViewer = ({
       scrollToPage(prevPage);
     }
   }, [currentPage, scrollToPage]);
+
+  // Sync pageInputValue with currentPage
+  useEffect(() => {
+    setPageInputValue(currentPage.toString());
+  }, [currentPage]);
 
   // Re-render all pages when scale changes
   useEffect(() => {
@@ -1015,7 +1027,34 @@ export const CustomPdfViewer = ({
                 <path d="M19 12H5m7 7l-7-7 7-7"/>
               </svg>
             </button>
-            <span className="text-[var(--color-text-primary)] min-w-[60px] text-center">{currentPage} / {totalPages}</span>
+            <input
+              type="text"
+              value={pageInputValue}
+              onChange={(e) => setPageInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const pageNum = Number(e.currentTarget.value);
+                  if (pageNum >= 1 && pageNum <= totalPages) {
+                    jumpToPage(pageNum);
+                  } else {
+                    setPageInputValue(currentPage.toString());
+                  }
+                }
+              }}
+              onBlur={() => {
+                const pageNum = Number(pageInputValue);
+                if (pageNum >= 1 && pageNum <= totalPages) {
+                  jumpToPage(pageNum);
+                } else {
+                  setPageInputValue(currentPage.toString());
+                }
+              }}
+              className="text-[var(--color-text-primary)] w-7 rounded-sm text-center mx-1 border-gray-500 border"
+            />
+            <span className="text-[var(--color-text-primary)]">/</span>
+              
+              <span className='text-[var(--color-text-primary)] w-4 text-center mx-1'>{totalPages}</span>
+
             <button 
               onClick={goToNextPage} 
               disabled={currentPage >= totalPages}
