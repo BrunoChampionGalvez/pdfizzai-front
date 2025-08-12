@@ -19,7 +19,6 @@ export default function ChatPane() {
   const [message, setMessage] = useState('');
   const [isNewSession, setIsNewSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [sessionJustCreated, setSessionJustCreated] = useState<string | null>(null);
   const { 
     currentSessionId, 
     messages, 
@@ -45,6 +44,7 @@ export default function ChatPane() {
   const { showFileDisplay } = usePDFViewer();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
+  const isCreatingSessionRef = useRef(false);
   // const router = useRouter(); // Commented out as it's not used
   
   // @ functionality state
@@ -66,9 +66,10 @@ export default function ChatPane() {
     const loadChatHistory = async () => {
       if (currentSessionId) {
         // Don't load history for sessions that were just created in this component
-        if (sessionJustCreated === currentSessionId) {
+        if (isCreatingSessionRef.current) {
           console.log('Skipping history load for just-created session:', currentSessionId);
           setIsNewSession(false);
+          isCreatingSessionRef.current = false;
           return;
         }
         
@@ -93,12 +94,11 @@ export default function ChatPane() {
       } else {
         setMessages([]);
         setIsNewSession(true);
-        setSessionJustCreated(null);
       }
     };
 
     loadChatHistory();
-  }, [currentSessionId, sessionJustCreated]);
+  }, [currentSessionId]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -362,12 +362,7 @@ export default function ChatPane() {
         sessionId = newSession.id;
         
         // Mark this session as just created to prevent history loading
-        setSessionJustCreated(sessionId);
-        
-        // Clear the flag after a short delay to allow future navigation to this session
-        setTimeout(() => {
-          setSessionJustCreated(null);
-        }, 5000); // Clear after 5 seconds
+        isCreatingSessionRef.current = true;
         
         // Add the session to the sessions list and update the current session
         addSession(newSession);
