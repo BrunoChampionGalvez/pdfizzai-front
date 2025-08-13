@@ -45,6 +45,7 @@ export default function ChatPane() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const isCreatingSessionRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   // const router = useRouter(); // Commented out as it's not used
   
   // @ functionality state
@@ -55,12 +56,41 @@ export default function ChatPane() {
   const [selectedMaterials, setSelectedMaterials] = useState<MentionedMaterial[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchResultsRef = useRef<HTMLDivElement>(null);
+
+  // Simple scroll position tracking for sidebar collapse/expand only
+  const previousScrollTop = useRef<number>(0);
   
   // Handle initial animation
   useEffect(() => {
     setMounted(true);
   }, []);
-  
+
+  // Track scroll position for sidebar collapse/expand only
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      previousScrollTop.current = el.scrollTop;
+    };
+
+    // Initialize with current position
+    previousScrollTop.current = el.scrollTop;
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+
+
+
+
+
+
+
+
   // Load chat history when session changes
   useEffect(() => {
     const loadChatHistory = async () => {
@@ -98,11 +128,29 @@ export default function ChatPane() {
     };
 
     loadChatHistory();
-  }, [currentSessionId]);
+  }, [currentSessionId, setLoading, setMessages]);
 
   // Scroll to bottom when messages change
+  const previousMessagesLength = useRef(messages.length);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    // Only scroll if new messages were actually added (not just re-renders)
+    if (messages.length <= previousMessagesLength.current) {
+      previousMessagesLength.current = messages.length;
+      return;
+    }
+    
+    const nearBottom = Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
+    if (!nearBottom) return; // respect user's scroll position
+    
+    const id = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
+    
+    previousMessagesLength.current = messages.length;
+    return () => clearTimeout(id);
   }, [messages]);
 
   // Focus search input when search is shown
@@ -536,6 +584,28 @@ export default function ChatPane() {
   // Determine if we're in side panel mode (when a file is selected and being displayed)
   const isSidePanelMode = !!currentReference?.fileId && showFileDisplay;
 
+  // Scroll position restoration only for sidebar collapse/expand (not PDF viewer toggles)
+  // Track previous states to detect actual changes
+  const previousSidebarState = useRef<boolean>(isSidebarCollapsed);
+  const previousSidePanelMode = useRef<boolean>(isSidePanelMode);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const sidebarStateChanged = previousSidebarState.current !== isSidebarCollapsed;
+    const sidePanelModeChanged = previousSidePanelMode.current !== isSidePanelMode;
+
+    if (sidebarStateChanged && !sidePanelModeChanged) {
+      requestAnimationFrame(() => {
+        el.scrollTop = previousScrollTop.current;
+      });
+    }
+
+    previousSidebarState.current = isSidebarCollapsed;
+    previousSidePanelMode.current = isSidePanelMode;
+  }, [isSidebarCollapsed, isSidePanelMode]);
+
   return (
     <div className={`bg-background-chat relative h-full flex flex-col min-h-0 overflow-hidden transition-all duration-300 ease-in-out shadow-sm
         ${isSidePanelMode 
@@ -543,7 +613,7 @@ export default function ChatPane() {
           : 'w-full max-w-4xl mx-auto px-8'          // Centered with max width when no PDF
         } ${mounted ? 'opacity-100' : 'opacity-0'}`}
     >
-      <div className={`flex-1 min-h-0 overflow-y-auto p-4 ${messages.length === 0 && isNewSession && !isSidePanelMode ? 'flex flex-col items-center justify-center' : ''}`}>
+      <div className={`flex-1 min-h-0 overflow-y-auto p-4 ${messages.length === 0 && isNewSession && !isSidePanelMode ? 'flex flex-col items-center justify-center' : ''}`} ref={scrollContainerRef}>
          {messages.length === 0 && isNewSession && !isSidePanelMode ? (
            <div className="w-full max-w-2xl transition-all duration-500 flex flex-col items-center">
              <div className="text-center text-text-primary text-4xl font-semibold mb-8">
@@ -676,7 +746,7 @@ export default function ChatPane() {
                   placeholder={hasExceededMessageLimit() ? "Message limit reached" : "Type your question here..."}
                   className="flex-1 bg-primary border border-secondary rounded-l-lg px-6 py-4 focus:outline-none focus:border-accent text-text-primary text-lg resize-none overflow-hidden min-h-[4rem] max-h-[10rem]"
                   disabled={isLoading || hasExceededMessageLimit()}
-                  autoFocus
+                  autoFocus={isNewSession && messages.length === 0} // Only autofocus for truly new sessions
                   rows={1}
                   style={{
                     height: 'auto',
@@ -722,7 +792,6 @@ export default function ChatPane() {
             {messages.map(message => (
               <MessageBubble
                 key={message.id}
-                id={message.id}
                 role={message.role}
                 firstContent={message.content}
                 created_at={message.created_at}

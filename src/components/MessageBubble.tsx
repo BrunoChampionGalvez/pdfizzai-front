@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chat';
 import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { formatTime } from '../lib/utils';
@@ -9,19 +9,116 @@ import { chatService } from '../services/chat';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+interface MaybeHttpError {
+  response?: { status?: number };
+  status?: number;
+  code?: string | number;
+}
+
+// Helper: retry with exponential backoff for 429 errors
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 1000,
+  maxDelayMs: number = 8000
+): Promise<T> {
+  let lastError: unknown;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: unknown) {
+      lastError = error;
+      
+      const e = error as MaybeHttpError;
+      // Only retry on 429 (Too Many Requests) or network errors
+      const is429 = e.response?.status === 429 || e.status === 429;
+      const isNetworkError = !e.response && e.code !== 'ECONNABORTED';
+      
+      if (!is429 && !isNetworkError) {
+        throw error; // Don't retry other errors
+      }
+      
+      if (attempt === maxRetries) {
+        break; // Max retries reached
+      }
+      
+      // Calculate delay with exponential backoff and jitter
+      const delay = Math.min(
+        baseDelayMs * Math.pow(2, attempt) + Math.random() * 1000,
+        maxDelayMs
+      );
+      
+      console.log(`Request failed with ${e.response?.status ?? 'network error'}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError;
+}
+
+// Global request queue to ensure all extracted-content calls are sequential across all components
+const globalRequestQueue = (() => {
+  const queue: Array<() => Promise<unknown>> = [];
+  let processing = false;
+
+  const processQueue = async () => {
+    if (processing || queue.length === 0) return;
+    processing = true;
+
+    while (queue.length > 0) {
+      const task = queue.shift()!;
+      try {
+        await task();
+      } catch (error) {
+        console.error('Queue task failed:', error);
+      }
+      // Small delay between requests to be extra safe
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    processing = false;
+  };
+
+  return {
+    enqueue: (task: () => Promise<unknown>) => {
+      return new Promise((resolve, reject) => {
+        queue.push(async () => {
+          try {
+            const result = await task();
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        });
+        processQueue();
+      });
+    }
+  };
+})();
+
+// Deduplicated, sequential fetch helper for extracted-content
+const inflightExtractedContent: Record<string, Promise<{ fileId: string; text: string; fileName: string }>> = {};
+function getExtractedContentSequential(rawRefId: string, sessionId: string) {
+  if (rawRefId in inflightExtractedContent) return inflightExtractedContent[rawRefId];
+  const p = globalRequestQueue
+    .enqueue(() => retryWithBackoff(() => chatService.getExtractedContentByRawRefId(rawRefId, sessionId)))
+    .finally(() => {
+      delete inflightExtractedContent[rawRefId];
+    }) as Promise<{ fileId: string; text: string; fileName: string }>;
+  inflightExtractedContent[rawRefId] = p;
+  return p;
+}
+
 interface ChatReference {
   fileId: string;
   page: number;
   text: string;
 }
 
-interface ReferenceTag {
-  id: string;
-  text: string;
-}
+/* numbering helpers removed in favor of session-scoped persistent numbering */
 
 interface MessageBubbleProps {
-  id: string;
   role: 'user' | 'model';
   firstContent: string;
   created_at: string;
@@ -32,21 +129,124 @@ interface MessageBubbleProps {
 
 export default function MessageBubble({ 
   role,
-  id,
   firstContent, 
   created_at, 
   references, 
-  selectedMaterials,
   isSidePanelMode = false
 }: MessageBubbleProps) {
-  const { setCurrentReference } = useChatStore();
+  const { setCurrentReference, currentSessionId } = useChatStore();
   const { handleShowFile } = usePDFViewer();
-  const [showMentions, setShowMentions] = useState(false);
   const [loadingRefAction, setLoadingRefAction] = useState<string | null>(null);
   const [filePaths, setFilePaths] = useState<Record<string, string>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, boolean>>({});
   const [content, setContent] = useState<string>(firstContent || '');
   const processedIdsRef = useRef<Set<string>>(new Set());
+  // Store mapping from rawRefId to text content for numbering
+  const [refIdToText, setRefIdToText] = useState<Record<string, string>>({});
+  // Store mapping from normalized text to assigned number (persisted per session)
+  const [textToNumber, setTextToNumber] = useState<Record<string, number>>({});
+  // Store mapping from rawRefId to fileId for reuse (avoid duplicate extracted-content calls)
+  const [refIdToFileId, setRefIdToFileId] = useState<Record<string, string>>({});
+
+
+  // // Helper: process requests in batches to avoid overwhelming backend
+  // async function processBatchedRequests<T>(
+  //   items: string[],
+  //   processor: (item: string) => Promise<T>,
+  //   batchSize: number = 3,
+  //   delayMs: number = 100
+  // ): Promise<Array<{ id: string; result: T | null }>> {
+  //   const results: Array<{ id: string; result: T | null }> = [];
+
+  //   for (let i = 0; i < items.length; i += batchSize) {
+  //     const batch = items.slice(i, i + batchSize);
+
+  //     // Process batch in parallel with retry logic
+  //     const batchPromises = batch.map(async (item) => {
+  //       try {
+  //         const result = await retryWithBackoff(() => processor(item));
+  //         return { id: item, result };
+  //       } catch (error) {
+  //         console.error(`Error processing ${item} after retries:`, error);
+  //         return { id: item, result: null };
+  //       }
+  //     });
+
+  //     const batchResults = await Promise.all(batchPromises);
+  //     results.push(...batchResults);
+
+  //     // Add delay between batches (except for the last batch)
+  //     if (i + batchSize < items.length) {
+  //       await new Promise((resolve) => setTimeout(resolve, delayMs));
+  //     }
+  //   }
+
+  //   return results;
+  // }
+
+  // Helper: reference text cache in localStorage (namespaced by session)
+  const getCacheKey = useCallback(() => {
+    const sid = currentSessionId || 'global';
+    return `refdoc_refTextMap_${sid}`;
+  }, [currentSessionId]);
+  const getRefTextCache = useCallback((): Record<string, string> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(getCacheKey());
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }, [getCacheKey]);
+  const setRefTextCache = useCallback((updates: Record<string, string>) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const current = getRefTextCache();
+      const merged = { ...current, ...updates };
+      localStorage.setItem(getCacheKey(), JSON.stringify(merged));
+    } catch {
+      // ignore cache errors
+    }
+  }, [getCacheKey, getRefTextCache]);
+
+  // Helper: numbering cache in localStorage (namespaced by session)
+  const getNumCacheKey = useCallback(() => {
+    const sid = currentSessionId || 'global';
+    return `refdoc_refNumMap_${sid}`;
+  }, [currentSessionId]);
+  const getNumNextKey = useCallback(() => {
+    const sid = currentSessionId || 'global';
+    return `refdoc_refNumNext_${sid}`;
+  }, [currentSessionId]);
+  const getRefNumCache = useCallback((): Record<string, number> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem(getNumCacheKey());
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }, [getNumCacheKey]);
+  const setRefNumCache = useCallback((updates: Record<string, number>) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const current = getRefNumCache();
+      const merged = { ...current, ...updates };
+      localStorage.setItem(getNumCacheKey(), JSON.stringify(merged));
+    } catch {
+      // ignore cache errors
+    }
+  }, [getNumCacheKey, getRefNumCache]);
+  const getNextCounter = useCallback((): number => {
+    if (typeof window === 'undefined') return 1;
+    const raw = localStorage.getItem(getNumNextKey());
+    const n = raw ? parseInt(raw, 10) : 1;
+    return isNaN(n) || n < 1 ? 1 : n;
+  }, [getNumNextKey]);
+  const setNextCounter = useCallback((n: number) => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(getNumNextKey(), String(n));
+  }, [getNumNextKey]);
 
   // Update content when firstContent prop changes (for streaming updates)
   useEffect(() => {
@@ -54,11 +254,11 @@ export default function MessageBubble({
   }, [firstContent]);
 
   // Parse content into segments preserving the order of text and references
-  const parseContentIntoSegments = (content: string): Array<{ type: 'text' | 'reference'; content: string; tag?: ReferenceTag }> => {
+  const parseContentIntoSegments = (content: string): Array<{ type: 'text' | 'reference'; content: string; tag?: { rawRefId?: string } }> => {
     const parts = content.split(/(\[REF\]|\[\/REF\])/);
-    const segments: Array<{ type: 'text' | 'reference'; content: string; tag?: ReferenceTag }> = [];
+    const segments: Array<{ type: 'text' | 'reference'; content: string; tag?: { rawRefId?: string } }> = [];
     let inReference = false;
-    let currentRefSegment: { type: 'reference'; content: string; tag?: ReferenceTag } | null = null;
+    let currentRefSegment: { type: 'reference'; content: string; tag?: { rawRefId?: string } } | null = null;
     
     parts.forEach(part => {
       if (part === '[REF]') {
@@ -69,19 +269,11 @@ export default function MessageBubble({
         inReference = false;
         if (currentRefSegment) {
           const contentToParse = currentRefSegment.content.trim();
-          
-          try {
-            if (!contentToParse) {
-              currentRefSegment.tag = { id: 'empty_ref_content', text: '' } as ReferenceTag;
-            } else {
-              currentRefSegment.tag = JSON.parse(contentToParse);
-              
-              if (typeof currentRefSegment.tag !== 'object' || currentRefSegment.tag === null) {
-                currentRefSegment.tag = { id: 'parse_error_non_object', text: '' } as ReferenceTag;
-              }
-            }
-          } catch {
-            currentRefSegment.tag = { id: 'parse_error', text: '' } as ReferenceTag;
+          // New format: inside REF tags we only have the rawRefId as plain text
+          if (contentToParse) {
+            currentRefSegment.tag = { rawRefId: contentToParse };
+          } else {
+            currentRefSegment.tag = { rawRefId: undefined };
           }
         }
         currentRefSegment = null;
@@ -101,170 +293,304 @@ export default function MessageBubble({
     return segments;
   };
   
-  // Memoize reference IDs to avoid re-running effect on every content change
-  const referenceIds = useMemo(() => {
-    if (!content || role !== 'model') return [];
-    
+  // Collect reference rawRefIds in order of appearance
+  const referenceRawIds = useMemo(() => {
+    if (!content || role !== 'model') return [] as string[];
     const segments = parseContentIntoSegments(content);
     return segments
-      .filter(segment => segment.type === 'reference' && segment.tag?.id)
-      .map(segment => segment.tag!.id);
+      .filter(segment => segment.type === 'reference' && segment.tag?.rawRefId)
+      .map(segment => segment.tag!.rawRefId!) as string[];
   }, [content, role]);
-  
-  // Load file paths for references when new reference IDs are found
+
+  // When session changes, load number map from cache
   useEffect(() => {
-    // Debounce the reference loading to avoid too many API calls during streaming
+    setTextToNumber(getRefNumCache());
+  }, [currentSessionId, getRefNumCache]);
+
+  // Clear all in-memory reference state when session changes to prevent cross-chat leakage
+  useEffect(() => {
+    // Clear all local state when switching sessions
+    setRefIdToText({});
+    setRefIdToFileId({});
+    setFilePaths({});
+    setLoadingPaths({});
+    processedIdsRef.current.clear();
+    
+    // Load the session-specific number cache
+    setTextToNumber(getRefNumCache());
+  }, [currentSessionId, getRefNumCache]);
+
+  // Load extracted content text for each rawRefId for numbering (with localStorage cache)
+  useEffect(() => {
+    if (referenceRawIds.length === 0) return;
+
+    // Prime from cache synchronously
+    const cache = getRefTextCache();
+    const cached: Record<string, string> = {};
+    const missing: string[] = [];
+    for (const id of referenceRawIds) {
+      if (refIdToText[id]) continue;
+      if (cache[id]) {
+        cached[id] = cache[id];
+      } else {
+        missing.push(id);
+      }
+    }
+    if (Object.keys(cached).length > 0) {
+      setRefIdToText(prev => ({ ...prev, ...cached }));
+    }
+    if (missing.length === 0) return;
+
+    // Fetch the missing ones SEQUENTIALLY to avoid 429s
+    (async () => {
+      const textMapping: Record<string, string> = {};
+      const fileIdMapping: Record<string, string> = {};
+
+      // sort numerically by trailing digits (reference number) to maintain stable ordering
+      const missingSorted = [...missing].sort((a, b) => {
+        const na = parseInt(a.match(/(\d+)$/)?.[1] || '0', 10);
+        const nb = parseInt(b.match(/(\d+)$/)?.[1] || '0', 10);
+        return na - nb;
+      });
+
+      for (const rawRefId of missingSorted) {
+        try {
+          const extractedContent = await getExtractedContentSequential(rawRefId, currentSessionId || '');
+          textMapping[rawRefId] = extractedContent.text;
+          fileIdMapping[rawRefId] = extractedContent.fileId;
+        } catch (error) {
+          console.error(`Error fetching extracted content for ${rawRefId}:`, error);
+        }
+      }
+
+      if (Object.keys(textMapping).length > 0) {
+        setRefIdToText(prev => ({ ...prev, ...textMapping }));
+        setRefTextCache(textMapping);
+      }
+      if (Object.keys(fileIdMapping).length > 0) {
+        setRefIdToFileId(prev => ({ ...prev, ...fileIdMapping }));
+      }
+    })();
+  }, [referenceRawIds, refIdToText, currentSessionId, getRefTextCache, setRefTextCache]);
+
+  // Simple normalization to make deduplication more robust
+  const normalizeText = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+  // Ensure numbers are assigned for all known texts (in order of appearance)
+  useEffect(() => {
+    if (referenceRawIds.length === 0) return;
+
+    // Build ordered list of normalized texts for the visible message content
+    const textsInOrder: string[] = [];
+    for (const id of referenceRawIds) {
+      const t = refIdToText[id];
+      if (!t) continue; // wait until text is available
+      const key = normalizeText(t);
+      if (key && !textsInOrder.includes(key)) {
+        textsInOrder.push(key);
+      }
+    }
+    if (textsInOrder.length === 0) return;
+
+    // Load existing caches
+    const numMap = getRefNumCache();
+    let next = getNextCounter();
+    let changed = false;
+
+    for (const key of textsInOrder) {
+      if (numMap[key] == null) {
+        numMap[key] = next;
+        next += 1;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      setRefNumCache(numMap);
+      setNextCounter(next);
+      setTextToNumber({ ...numMap });
+    } else {
+      // Ensure local state is in sync if it was empty
+      if (Object.keys(textToNumber).length === 0 && Object.keys(numMap).length > 0) {
+        setTextToNumber({ ...numMap });
+      }
+    }
+  }, [referenceRawIds, refIdToText, currentSessionId, textToNumber, getRefNumCache, getNextCounter, setRefNumCache, setNextCounter]);
+
+  // Load file paths for references when new reference IDs are found (we still support showing file path if needed)
+  useEffect(() => {
     const timer = setTimeout(() => {
-      const newReferenceIds = referenceIds.filter(id => 
+      const newIds = referenceRawIds.filter(id => 
         !filePaths[id] && 
         !loadingPaths[id] && 
         !processedIdsRef.current.has(id)
       );
       
-      if (newReferenceIds.length === 0) return;
+      if (newIds.length === 0) return;
+      newIds.forEach(id => processedIdsRef.current.add(id));
+      setLoadingPaths(prev => ({ ...prev, ...Object.fromEntries(newIds.map(id => [id, true])) }));
       
-      // Mark IDs as processed and loading
-      newReferenceIds.forEach(id => {
-        processedIdsRef.current.add(id);
-      });
-      
-      const newLoadingPaths = { ...loadingPaths };
-      newReferenceIds.forEach(id => {
-        newLoadingPaths[id] = true;
-      });
-      setLoadingPaths(newLoadingPaths);
-      
-      // Load paths for all new reference IDs sequentially to avoid too many simultaneous requests
       (async () => {
-        const results: Array<{ id: string; path: string }> = [];
-        for (const id of newReferenceIds) {
+        const pathMapping: Record<string, string> = {};
+
+        // Process one by one to ensure any extracted-content calls are sequential
+        for (const id of newIds) {
           try {
-            const path = await chatService.getFilePath(id);
-            results.push({ id, path });
+            let fileId = refIdToFileId[id];
+            if (!fileId) {
+              // This will be called sequentially due to the for-loop
+              const data = await getExtractedContentSequential(id, currentSessionId || '');
+              fileId = data.fileId;
+              setRefIdToFileId(prev => ({ ...prev, [id]: fileId }));
+            }
+            const path = await chatService.getFilePath(fileId);
+            pathMapping[id] = path;
           } catch (error) {
-            console.error(`Error loading path for ${id}:`, error);
-            results.push({ id, path: '[Error loading path]' });
+            console.error(`Error resolving path for ${id}:`, error);
+            pathMapping[id] = '[Error loading path]';
           }
         }
 
-        setFilePaths(prev => {
-        const newFilePaths = { ...prev };
-        results.forEach(({ id, path }) => {
-          newFilePaths[id] = path;
-        });
-        return newFilePaths;
-        });
-
-        setLoadingPaths(prev => {
-        const newLoadingPathsUpdate = { ...prev };
-        results.forEach(({ id }) => {
-          newLoadingPathsUpdate[id] = false;
-        });
-        return newLoadingPathsUpdate;
-        });
+        setFilePaths(prev => ({ ...prev, ...pathMapping }));
+        setLoadingPaths(prev => ({ ...prev, ...Object.fromEntries(newIds.map(id => [id, false])) }));
       })();
-    }, 300); // 300ms debounce
-    
+    }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [referenceIds]); // Only depend on referenceIds, not the state we're updating to avoid infinite loops
+  }, [referenceRawIds, filePaths, loadingPaths, refIdToFileId, currentSessionId]);
   
-  const handleReferenceClick = async (reference: ChatReference) => {
-    // Set the current reference in the chat store for layout management
-    setCurrentReference(reference);
-    
-    // Show the file in the PDF viewer with the specific text snippet
-    await handleShowFile(reference.fileId, reference.text);
-  };
-
-  const handleShowFileWrapper = async (fileId: string, textSnippet: string) => {
-    if (!fileId) {
-      console.error('Invalid file ID provided to handleShowFile');
+  const handleShowFileWrapper = async (rawRefId: string) => {
+    if (!rawRefId) {
+      console.error('Invalid rawRefId provided to handleShowFile');
       return;
     }
-
-    setLoadingRefAction(fileId);
     
+    setLoadingRefAction(rawRefId);
     try {
-      // Set the current reference in the chat store for layout management
-      setCurrentReference({ fileId, text: textSnippet, page: 1 });
+      // First try to use cached data to avoid unnecessary API calls
+      let fileId = refIdToFileId[rawRefId];
+      let text = refIdToText[rawRefId];
       
-      // Show the file in the PDF viewer with the specific text snippet
-      await handleShowFile(fileId, textSnippet);
+      // Only make API call if we don't have the required data
+      if (!fileId || !text) {
+        console.log(`Missing cached data for ${rawRefId}, fetching from API...`);
+        const data = await getExtractedContentSequential(rawRefId, currentSessionId || '');
+        fileId = data.fileId;
+        text = data.text;
+        
+        // Update caches
+        setRefIdToFileId(prev => ({ ...prev, [rawRefId]: fileId }));
+        setRefIdToText(prev => ({ ...prev, [rawRefId]: text }));
+        setRefTextCache({ [rawRefId]: text });
+      } else {
+        console.log(`Using cached data for ${rawRefId}`);
+      }
+      
+      // Set current reference in store
+      setCurrentReference({ fileId, text, page: 1 });
+      
+      // Open PDF and highlight text
+      await handleShowFile(fileId, text);
     } catch (error) {
-      console.error('Error showing file:', error);
+      console.error('Error showing file for rawRefId:', error);
     } finally {
       setLoadingRefAction(null);
     }
   };
 
-  const handleLoadReferenceAgain = async (referenceId: string, textSnippet: string) => {
-    console.log(`Loading reference again for ID: ${referenceId} with text: "${textSnippet}"`);
-    
-    setLoadingRefAction(referenceId);
-    
-    try {
-      const result = await chatService.loadReferenceAgain(referenceId, id, textSnippet, content);
-      setContent(result)
-    } catch (error) {
-      console.error('Error loading reference again:', error);
-      alert('Failed to load reference content. Please try again.');
-    } finally {
-      setLoadingRefAction(null);
+  // Render a numbered inline button for a reference
+  const renderReferenceInlineButton = (rawRefId: string | undefined, key: number | string) => {
+    if (!rawRefId) {
+      return (
+        <span key={`ref-${key}`} className="align-baseline ml-1 inline-flex items-center text-xs text-text-secondary">[?]</span>
+      );
     }
-  };
 
-  // Render a reference tag
-  const renderReferenceTag = (tag: ReferenceTag, index: number | string) => {
-    const baseClasses = "mt-2 mb-3 p-3 border rounded-md";
-    const isLoading = loadingRefAction === tag.id;
+    const textContent = refIdToText[rawRefId];
+    const isOpening = loadingRefAction === rawRefId;
 
-    const path = filePaths[tag.id] || (loadingPaths[tag.id] ? 'Loading...' : 'Path not found');
-    
+    // Show spinner while loading text or waiting for number assignment
+    if (!textContent) {
+      return (
+        <span key={`ref-${key}`} className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-secondary text-text-primary border border-secondary rounded">
+          <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
+        </span>
+      );
+    }
+
+    const keyNorm = normalizeText(textContent);
+    const number = textToNumber[keyNorm];
+
+    if (!number) {
+      return (
+        <span key={`ref-${key}`} className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-secondary text-text-primary border border-secondary rounded">
+          <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
+        </span>
+      );
+    }
+
     return (
-      <div className='ml-2 flex' key={`ref-${index}`}>
-        <div className='mr-2 min-w-[1rem] w-4 flex-shrink-0 h-6 border-l-2 border-b-2 border-accent-300 rounded-bl-md'></div>
-        <div className={`${baseClasses} flex-grow bg-accent-100 border-accent-300 border-l-4`}>
-          <div className="flex justify-between">
-            <div className="text-xs text-accent-300 font-semibold">File path: {path}</div>
-          </div>
-          <div className="text-sm text-text-secondary mt-1">
-            {tag.text && <><span className="font-semibold">Reference:</span> {tag.text}</> }
-          </div>
-          
-          <div className={`mt-2 ${isSidePanelMode ? 'space-y-2' : 'flex space-x-2'}`}>
-            <button 
-              className={`${isSidePanelMode ? 'w-full' : 'flex-1'} px-3 py-2 bg-accent-200 text-primary rounded hover:bg-accent-300 transition-colors text-sm font-medium cursor-pointer`}
-              onClick={() => handleShowFileWrapper(tag.id, tag.text || '')}
-              disabled={isLoading}
-            >
-              {isLoading && loadingRefAction === tag.id ? (
-                <div className="flex items-center justify-center">
-                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2"></div>
-                  <span>Loading...</span>
-                </div>
-              ) : 'Show File'}
-            </button>
-            
-            <button 
-              className={`${isSidePanelMode ? 'w-full' : 'flex-1'} px-3 py-2 bg-secondary text-text-primary border border-secondary rounded hover:bg-secondary-300 transition-colors text-sm font-medium cursor-pointer`}
-              onClick={() => handleLoadReferenceAgain(tag.id, tag.text || '')}
-              disabled={isLoading}
-            >
-              {isLoading && loadingRefAction === `load-${tag.id}` ? (
-                <div className="flex items-center justify-center">
-                  <div className="w-4 h-4 border-2 border-text-primary border-t-transparent rounded-full animate-spin mr-2"></div>
-                  <span>Loading...</span>
-                </div>
-              ) : 'Reload'}
-            </button>
-          </div>
-        </div>
-      </div>
+      <button
+        key={`ref-${key}`}
+        type="button"
+        className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-secondary text-text-primary border border-secondary rounded hover:bg-secondary-300 transition-colors cursor-pointer"
+        onClick={() => handleShowFileWrapper(rawRefId)}
+        onMouseDown={(e) => e.preventDefault()} // Prevent focus shift that could trigger scroll
+        tabIndex={-1} // Make button non-focusable to prevent scroll-into-view
+        disabled={isOpening}
+        title={`Reference ${number}`}
+      >
+        {isOpening ? (
+          <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
+        ) : (
+          <span>{number}</span>
+        )}
+      </button>
     );
   };
 
-  // Render content with reference tags
+  // Parse content and embed references inline within text
+  const parseContentWithInlineReferences = (content: string) => {
+    // Replace [REF]...[/REF] patterns with placeholder markers
+    let processedContent = content;
+    const refMatches: Array<{ rawRefId: string; placeholder: string }> = [];
+    let refIndex = 0;
+    
+    processedContent = processedContent.replace(/\[REF\](.*?)\[\/REF\]/g, (match, rawRefId) => {
+      const placeholder = `__REF_PLACEHOLDER_${refIndex}__`;
+      refMatches.push({ rawRefId: rawRefId.trim(), placeholder });
+      refIndex++;
+      return placeholder;
+    });
+    
+    return { processedContent, refMatches };
+  };
+
+  // Custom ReactMarkdown component to handle inline references
+  const InlineReferenceText = ({ children }: { children: React.ReactNode }) => {
+    const textContent = React.Children.toArray(children).join('');
+    const { processedContent, refMatches } = parseContentWithInlineReferences(textContent);
+    
+    if (refMatches.length === 0) {
+      return <>{children}</>;
+    }
+    
+    // Split by placeholders and insert reference buttons
+    const parts = processedContent.split(/(__REF_PLACEHOLDER_\d+__)/);
+    
+    return (
+      <>
+        {parts.map((part, index) => {
+          const refMatch = refMatches.find(ref => ref.placeholder === part);
+          if (refMatch) {
+            return renderReferenceInlineButton(refMatch.rawRefId, `inline-${index}`);
+          }
+          return part;
+        })}
+      </>
+    );
+  };
+
+  // Render content with inline numbered reference buttons
   const renderContentWithReferences = () => {
     if (!content) {
       if (role === 'model') {
@@ -278,63 +604,65 @@ export default function MessageBubble({
       return <div>No content</div>;
     }
 
-    // Parse content into segments preserving original order
-    const segments = parseContentIntoSegments(content);
-
     return (
       <div className="markdown-content w-full">
-        {segments.map((segment, index) => {
-          if (segment.type === 'text') {
-            const contentToRender = segment.content.trim();
-            return (
-              <div key={`text-${index}`} className="prose prose-slate w-full max-w-full break-words overflow-hidden">
-                <ReactMarkdown 
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    ul: ({...props}) => <ul className="list-disc pl-6 my-2 space-y-1" {...props} />,
-                    ol: ({...props}) => <ol className="list-decimal pl-6 my-2 space-y-1" {...props} />,
-                    li: ({...props}) => <li className="my-1" {...props} />,
-                    code: ({ children, ...props }: React.ComponentPropsWithoutRef<'code'>) => {
-                      return (
-                        <code className="bg-secondary px-1 py-0.5 rounded text-sm font-mono" {...props}>
-                          {children}
-                        </code>
-                      );
-                    },
-                    p: ({children, ...props}: React.ComponentPropsWithoutRef<'p'>) => {
-                      const textContent = React.Children.toArray(children).join('').trim();
-                      if (!textContent) return <br />;
-                      return <p className="my-2 break-words" {...props}>{children}</p>;
-                    },
-                    h1: ({...props}) => <h1 className="text-2xl font-bold mt-6 mb-4" {...props} />,
-                    h2: ({...props}) => <h2 className="text-xl font-bold mt-5 mb-3" {...props} />,
-                    h3: ({...props}) => <h3 className="text-lg font-bold mt-4 mb-2" {...props} />,
-                    em: ({...props}) => <em className="italic" {...props} />,
-                    strong: ({...props}) => <strong className="font-bold" {...props} />,
-                  }}
-                >
-                  {contentToRender}
-                </ReactMarkdown>
-              </div>
-            );
-          } else if (segment.type === 'reference') {
-            if (segment.tag) {
-              return renderReferenceTag(segment.tag, index);
-            } else {
-              return (
-                <div key={`ref-streaming-${index}`} className="mt-2 mb-3 p-3 border rounded-md bg-accent-50 border-accent">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin"></div>
-                    <div className="text-sm font-medium text-accent">
-                      Loading reference...
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-          }
-          return null;
-        })}
+        <div className="prose prose-slate w-full max-w-full break-words overflow-hidden">
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            components={{
+              ul: ({...props}) => <ul className="list-disc pl-6 my-2 space-y-1" {...props} />,
+              ol: ({...props}) => <ol className="list-decimal pl-6 my-2 space-y-1" {...props} />,
+              li: ({children, ...props}: React.ComponentPropsWithoutRef<'li'>) => (
+                <li className="my-1" {...props}>
+                  <InlineReferenceText>{children}</InlineReferenceText>
+                </li>
+              ),
+              code: ({ children, ...props }: React.ComponentPropsWithoutRef<'code'>) => {
+                return (
+                  <code className="bg-secondary px-1 py-0.5 rounded text-sm font-mono" {...props}>
+                    {children}
+                  </code>
+                );
+              },
+              p: ({children, ...props}: React.ComponentPropsWithoutRef<'p'>) => {
+                const textContent = React.Children.toArray(children).join('').trim();
+                if (!textContent) return <br />;
+                return (
+                  <p className="my-2 break-words" {...props}>
+                    <InlineReferenceText>{children}</InlineReferenceText>
+                  </p>
+                );
+              },
+              h1: ({children, ...props}) => (
+                <h1 className="text-2xl font-bold mt-6 mb-4" {...props}>
+                  <InlineReferenceText>{children}</InlineReferenceText>
+                </h1>
+              ),
+              h2: ({children, ...props}) => (
+                <h2 className="text-xl font-bold mt-5 mb-3" {...props}>
+                  <InlineReferenceText>{children}</InlineReferenceText>
+                </h2>
+              ),
+              h3: ({children, ...props}) => (
+                <h3 className="text-lg font-bold mt-4 mb-2" {...props}>
+                  <InlineReferenceText>{children}</InlineReferenceText>
+                </h3>
+              ),
+              em: ({children, ...props}) => (
+                <em className="italic" {...props}>
+                  <InlineReferenceText>{children}</InlineReferenceText>
+                </em>
+              ),
+              strong: ({children, ...props}) => (
+                <strong className="font-bold" {...props}>
+                  <InlineReferenceText>{children}</InlineReferenceText>
+                </strong>
+              ),
+            }}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
       </div>
     );
   };
@@ -350,47 +678,6 @@ export default function MessageBubble({
       }`}>
         {renderContentWithReferences()}
         
-        {/* Show "See mentions" dropdown for user messages with selected materials */}
-        {isUser && selectedMaterials && selectedMaterials.length > 0 && (
-          <div className="mt-2 mb-1">
-            <button 
-              onClick={() => setShowMentions(!showMentions)}
-              className={`flex items-center text-xs ${isUser ? 'text-primary-200' : 'text-accent'} hover:underline focus:outline-none`}
-            >
-              <span>See mentions</span>
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                className={`h-3 w-3 ml-1 transition-transform duration-200 ${showMentions ? 'transform rotate-180' : ''}`} 
-                fill="none" 
-                viewBox="0 0 24 24" 
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {/* Materials dropdown */}
-            {showMentions && (
-              <div className="mt-1.5 p-2 bg-primary rounded-md">
-                <div className="flex flex-wrap gap-1">
-                  {selectedMaterials.map(material => (
-                    <div 
-                      key={material.id} 
-                      className="inline-flex items-center bg-primary-100 border-2 border-accent text-accent px-2 py-1 rounded-md text-xs"
-                    >
-                      <span className="mr-1">
-                        {material.type === 'folder' && '📁'}
-                        {material.type === 'file' && '📄'}
-                      </span>
-                      <span>{material.displayName}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        
         {/* Legacy references support */}
         {references && references.length > 0 && (
           <div className="mt-3 border-t border-secondary pt-2 space-y-2">
@@ -399,7 +686,7 @@ export default function MessageBubble({
               <div 
                 key={index}
                 className="text-xs bg-primary p-2 rounded cursor-pointer hover:bg-primary-200 transition-colors"
-                onClick={() => handleReferenceClick(reference)}
+                onClick={() => setCurrentReference(reference)}
               >
                 <div className="flex justify-between">
                   <span className="font-semibold">Page {reference.page}</span>

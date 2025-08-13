@@ -246,4 +246,11 @@ export const chatService = {
     const response = await api.get<{ path: string }>(`/api/chat/reference-path/${id}`);
     return response.data.path;
   },
+
+  async getExtractedContentByRawRefId(rawRefId: string, sessionId: string): Promise<{ fileId: string; text: string; fileName: string }> {
+    console.log('Inside getExtractedContentByRawRefId Service');
+    
+    const response = await api.get<{ fileId: string; text: string; fileName: string }>(`/api/chat/extracted-content/${rawRefId}`, { params: { sessionId } });
+    return response.data;
+  },
 };

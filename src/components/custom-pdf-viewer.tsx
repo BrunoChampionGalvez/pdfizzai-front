@@ -385,39 +385,69 @@ export const CustomPdfViewer = ({
     let normalized = '';
     const map: number[] = [];
     
-    // First pass: Unicode normalization and special character handling
-    const unicodeNormalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Enhanced normalization sequence
+    
+    // Step 1: Unicode normalization to decomposed form, then remove diacritics
+    const unicodeNormalized = text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, ''); // Remove combining diacritical marks
+    
+    // Step 2: Handle ligatures and special characters
+    const ligatureNormalized = unicodeNormalized
+      .replace(/ﬀ/g, 'ff')
+      .replace(/ﬁ/g, 'fi')
+      .replace(/ﬂ/g, 'fl')
+      .replace(/ﬃ/g, 'ffi')
+      .replace(/ﬄ/g, 'ffl')
+      .replace(/ſ/g, 's') // Long s
+      .replace(/ﬆ/g, 'st')
+      .replace(/æ/g, 'ae')
+      .replace(/œ/g, 'oe')
+      .replace(/Æ/g, 'AE')
+      .replace(/Œ/g, 'OE')
+      .replace(/ß/g, 'ss')
+      .replace(/ð/g, 'd')
+      .replace(/þ/g, 'th')
+      .replace(/Ð/g, 'D')
+      .replace(/Þ/g, 'TH');
+    
+    // Step 3: Normalize special whitespace and quotes
+    const specialCharsNormalized = ligatureNormalized
+      .replace(/[\u00A0\u2000-\u200B\u2028\u2029\u3000]/g, ' ') // Various Unicode spaces
+      .replace(/[\u2018\u2019]/g, "'") // Smart single quotes
+      .replace(/[\u201C\u201D]/g, '"') // Smart double quotes
+      .replace(/[\u2013\u2014]/g, '-') // En dash, Em dash
+      .replace(/\u2026/g, '...') // Ellipsis
+      .replace(/[\u2010\u2011]/g, '-'); // Hyphens
     
     let i = 0;
     let inWhitespace = false;
+    let previousWasHyphen = false;
     
-    for (i = 0; i < unicodeNormalized.length; i++) {
-      const char = unicodeNormalized[i];
+    for (i = 0; i < specialCharsNormalized.length; i++) {
+      const char = specialCharsNormalized[i];
+      const nextChar = i + 1 < specialCharsNormalized.length ? specialCharsNormalized[i + 1] : '';
       
-      // Handle various whitespace characters
-      if (/[\s\u00A0\u2000-\u200B\u2028\u2029]/.test(char)) {
+      // Handle various whitespace characters and line breaks
+      if (/\s/.test(char)) {
         if (!inWhitespace && normalized.length > 0) {
-          // Look ahead to handle hyphenated words
-          let j = i + 1;
-          while (j < unicodeNormalized.length && /\s/.test(unicodeNormalized[j])) {
-            j++;
-          }
-          
-          // Check if previous character was a hyphen
-          if (normalized.endsWith('-')) {
-            // Don't add space after hyphen (line break hyphenation)
+          // Look ahead for hyphenated word breaks (hyphen followed by whitespace)
+          if (previousWasHyphen && /\s/.test(nextChar)) {
+            // This is likely a hyphenated line break - don't add space
             inWhitespace = true;
             continue;
           }
           
+          // Regular space - but collapse multiple spaces
           normalized += ' ';
           map.push(i);
           inWhitespace = true;
         }
+        previousWasHyphen = false;
       } 
-      // Handle punctuation spacing
+      // Handle punctuation spacing normalization
       else if (/[.,:;!?]/.test(char)) {
-        // Remove space before punctuation if it exists
+        // Remove preceding space before punctuation
         if (normalized.endsWith(' ')) {
           normalized = normalized.slice(0, -1);
           map.pop();
@@ -425,77 +455,115 @@ export const CustomPdfViewer = ({
         normalized += char;
         map.push(i);
         inWhitespace = false;
+        previousWasHyphen = false;
       }
-      // Handle hyphens after numbers
-      else if (char === '-' && normalized.length > 0 && /\d/.test(normalized[normalized.length - 1])) {
-        // Look ahead for multiple hyphens
-        let j = i + 1;
-        while (j < unicodeNormalized.length && unicodeNormalized[j] === '-') {
-          j++;
+      // Handle hyphens with special logic
+      else if (char === '-') {
+        // Check if this hyphen is followed by whitespace (potential line break)
+        const isLineBreakHyphen = /\s/.test(nextChar);
+        
+        // If previous char was a digit, skip multiple hyphens (common in references)
+        if (normalized.length > 0 && /\d/.test(normalized[normalized.length - 1])) {
+          // Look ahead for multiple hyphens
+          let j = i + 1;
+          while (j < specialCharsNormalized.length && specialCharsNormalized[j] === '-') {
+            j++;
+          }
+          // Skip all hyphens after numbers
+          i = j - 1; // Will be incremented by loop
+          inWhitespace = false;
+          previousWasHyphen = false;
+        } else {
+          normalized += char;
+          map.push(i);
+          inWhitespace = false;
+          previousWasHyphen = !isLineBreakHyphen; // Only mark as hyphen if not line break
         }
-        // Only keep the number, skip all hyphens
-        i = j - 1; // Will be incremented by loop
-        inWhitespace = false;
       }
       // Regular characters
       else {
         normalized += char;
         map.push(i);
         inWhitespace = false;
+        previousWasHyphen = false;
       }
     }
     
-    // Final cleanup
+    // Final cleanup - trim and ensure proper spacing
     normalized = normalized.trim();
+    
+    // Ensure map is properly sized
+    while (map.length > normalized.length) {
+      map.pop();
+    }
     
     return { normalized, map };
   }, []);
 
-  // Create tolerant search patterns for fallback matching
+  // Enhanced tolerance patterns with more sophisticated fallbacks
   const createTolerancePatterns = useCallback((query: string) => {
     const patterns = [];
     
-    // Level 1: Strict normalized
+    // Normalize the query using the same robust normalization
+    const queryNormalized = buildRobustNormalizedWithMap(query).normalized.toLowerCase();
+    
+    // Level 1: Strict normalized match
     patterns.push({
-      pattern: normalizeTextRobust(query).toLowerCase(),
+      pattern: queryNormalized,
       tolerance: 'strict'
     });
     
-    // Level 2: Punctuation/whitespace tolerant
-    const punctuationTolerant = normalizeTextRobust(query)
-      .replace(/[.,:;!?]/g, '\\s*[.,:;!?]?\\s*')
-      .replace(/\s+/g, '\\s+')
-      .toLowerCase();
-    patterns.push({
-      pattern: punctuationTolerant,
-      tolerance: 'punctuation',
-      isRegex: true
-    });
+    // Level 2: Soft hyphen and line break tolerant
+    const hyphenTolerant = queryNormalized
+      .replace(/-/g, '-?\\s*') // Optional hyphen with optional whitespace
+      .replace(/\s+/g, '\\s+'); // Flexible whitespace
+    if (hyphenTolerant !== queryNormalized) {
+      patterns.push({
+        pattern: hyphenTolerant,
+        tolerance: 'hyphen',
+        isRegex: true
+      });
+    }
     
-    // Level 3: Hyphen relaxed
-    const hyphenRelaxed = normalizeTextRobust(query)
-      .replace(/-/g, '-?\\s*')
-      .replace(/\s+/g, '\\s+')
-      .toLowerCase();
-    patterns.push({
-      pattern: hyphenRelaxed,
-      tolerance: 'hyphen',
-      isRegex: true
-    });
+    // Level 3: Punctuation tolerant (punctuation becomes optional)
+    const punctuationTolerant = queryNormalized
+      .replace(/[.,:;!?]/g, '\\s*[.,:;!?]?\\s*') // Optional punctuation with optional spaces
+      .replace(/\s+/g, '\\s+'); // Flexible whitespace
+    if (punctuationTolerant !== queryNormalized && punctuationTolerant !== hyphenTolerant) {
+      patterns.push({
+        pattern: punctuationTolerant,
+        tolerance: 'punctuation',
+        isRegex: true
+      });
+    }
     
-    // Level 4: Letters and digits only (most permissive)
-        const lettersDigitsOnly = query.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        if (lettersDigitsOnly.length > 3) { // Only for reasonable length queries
-          patterns.push({
-            pattern: lettersDigitsOnly,
-            tolerance: 'letters_digits' as const
-          });
-        }
+    // Level 4: Word boundary flexible (allows for different word breaks)
+    const wordBoundaryFlexible = queryNormalized
+      .replace(/\s+/g, '\\s*') // Zero or more whitespace
+      .replace(/([a-z])([A-Z])/g, '$1\\s*$2'); // Allow breaks at case changes
+    if (wordBoundaryFlexible !== queryNormalized) {
+      patterns.push({
+        pattern: wordBoundaryFlexible,
+        tolerance: 'word_boundary',
+        isRegex: true
+      });
+    }
+    
+    // Level 5: Letters and digits only (most permissive, but only for longer queries)
+    if (queryNormalized.length > 4) {
+      const lettersDigitsOnly = queryNormalized.replace(/[^a-z0-9]/g, '');
+      if (lettersDigitsOnly.length > 3) {
+        patterns.push({
+          pattern: lettersDigitsOnly,
+          tolerance: 'letters_digits'
+        });
+      }
+    }
     
     return patterns;
-  }, [normalizeTextRobust]);
+  }, [buildRobustNormalizedWithMap]);
 
-  // Highlight text in specific page
+  // Highlight text in specific page with enhanced mapping
   const highlightTextInPage = useCallback(async (pageNum: number, searchQuery: string) => {
     if (!canvasContainerRef.current) return;
     
@@ -550,62 +618,120 @@ export const CustomPdfViewer = ({
     
     let matchStartOriginal = -1;
     let matchEndOriginal = -1;
+    let matchMethod = 'none';
 
-    // 1) Strict normalized search
+    console.log(`[Highlight] Search strategies for "${searchQuery}":`, {
+      original: queryLowerRaw,
+      patterns: patterns.map(p => ({ tolerance: p.tolerance, pattern: p.pattern })),
+      combinedLength: combined.length,
+      normalizedLength: combinedNormLower.length,
+      mapLength: map.length
+    });
+
+    // Strategy 1: Enhanced normalized search with mapping
     const strictPat = patterns.find(p => p.tolerance === 'strict');
     if (strictPat) {
       const normIdx = combinedNormLower.indexOf(strictPat.pattern as string);
       if (normIdx !== -1) {
         const normEndIdx = normIdx + (strictPat.pattern as string).length - 1;
-        matchStartOriginal = map[normIdx] ?? -1;
-        const endMapped = map[normEndIdx];
-        matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
+        // Enhanced mapping validation
+        if (normIdx < map.length && normEndIdx < map.length) {
+          matchStartOriginal = map[normIdx] ?? -1;
+          const endMapped = map[normEndIdx];
+          matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
+          matchMethod = 'strict_normalized';
+          console.log(`[Highlight] Strict normalized match: normalized[${normIdx}:${normEndIdx}] -> original[${matchStartOriginal}:${matchEndOriginal}]`);
+        }
       }
     }
 
-    // 2) Direct search on combined lower if not found
+    // Strategy 2: Direct search on combined lower (fallback)
     if (matchStartOriginal === -1) {
       const directIdx = combinedLower.indexOf(queryLowerRaw);
       if (directIdx !== -1) {
         matchStartOriginal = directIdx;
         matchEndOriginal = directIdx + queryLowerRaw.length;
+        matchMethod = 'direct_match';
+        console.log(`[Highlight] Direct match: original[${matchStartOriginal}:${matchEndOriginal}]`);
       }
     }
 
-    // 3) Tolerant regex on normalized combined if still not found
+    // Strategy 3: Advanced regex patterns with normalized text mapping
     if (matchStartOriginal === -1) {
       const tolerantPatterns = patterns.filter(p => (p as { isRegex?: boolean }).isRegex);
       for (const tolerantPat of tolerantPatterns) {
         try {
-          const re = new RegExp(tolerantPat.pattern as string);
+          const re = new RegExp(tolerantPat.pattern as string, 'i');
           const m = combinedNormLower.match(re);
           if (m && m.index !== undefined) {
             const normIdx = m.index;
             const normEndIdx = normIdx + m[0].length - 1;
-            matchStartOriginal = map[normIdx] ?? -1;
-            const endMapped = map[normEndIdx];
-            matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
-            break;
+            // Enhanced mapping with bounds checking
+            if (normIdx < map.length && normEndIdx < map.length) {
+              matchStartOriginal = map[normIdx] ?? -1;
+              const endMapped = map[normEndIdx];
+              matchEndOriginal = (endMapped !== undefined ? endMapped + 1 : -1);
+              matchMethod = `regex_${tolerantPat.tolerance}`;
+              console.log(`[Highlight] Regex ${tolerantPat.tolerance} match: normalized[${normIdx}:${normEndIdx}] -> original[${matchStartOriginal}:${matchEndOriginal}]`);
+              break;
+            }
           }
         } catch (e) {
           console.warn('[Highlight] Regex compilation failed for tolerant pattern', tolerantPat, e);
         }
       }
     }
+
+    // Strategy 4: Partial matching for very permissive search
+    if (matchStartOriginal === -1) {
+      const lettersDigits = patterns.find(p => p.tolerance === 'letters_digits');
+      if (lettersDigits) {
+        const simplifiedCombined = combinedLower.replace(/[^a-z0-9]/g, '');
+        const simplifiedQuery = lettersDigits.pattern as string;
+        const idx = simplifiedCombined.indexOf(simplifiedQuery);
+        if (idx !== -1) {
+          // Try to map back to approximate position in original text
+          // This is a heuristic mapping for very permissive search
+          const charCount = idx;
+          let originalPos = 0;
+          let charsSeen = 0;
+          for (let i = 0; i < combinedLower.length && charsSeen < charCount; i++) {
+            if (/[a-z0-9]/.test(combinedLower[i])) {
+              charsSeen++;
+            }
+            originalPos = i;
+          }
+          matchStartOriginal = originalPos;
+          matchEndOriginal = Math.min(originalPos + simplifiedQuery.length * 2, combined.length); // Approximate end
+          matchMethod = 'letters_digits_heuristic';
+          console.log(`[Highlight] Letters/digits heuristic match: approx original[${matchStartOriginal}:${matchEndOriginal}]`);
+        }
+      }
+    }
     
-    if (matchStartOriginal !== -1 && matchEndOriginal !== -1) {
-      console.log(`[Highlight] Match in combined text at [${matchStartOriginal}, ${matchEndOriginal})`);
+    if (matchStartOriginal !== -1 && matchEndOriginal !== -1 && matchStartOriginal < matchEndOriginal) {
+      console.log(`[Highlight] Final match using ${matchMethod}: combined text[${matchStartOriginal}:${matchEndOriginal}) = "${combined.slice(matchStartOriginal, matchEndOriginal)}"`);
       
       // Apply highlight to all spans whose segment overlaps the match range
       let firstHighlightedSpan: HTMLElement | null = null;
+      let highlightedSpanCount = 0;
+      
       for (const seg of segments) {
         if (seg.start < matchEndOriginal && seg.end > matchStartOriginal) {
           seg.span.classList.add('highlight');
-          // Inline styles are fine but CSS already applies appearance via !important
-          seg.span.style.backgroundColor = seg.span.style.backgroundColor || '#ffeb3b';
+          // Apply highlighting styles
+          seg.span.style.backgroundColor = '#ffeb3b';
+          seg.span.style.color = '#000';
+          seg.span.style.padding = '1px 2px';
+          seg.span.style.borderRadius = '2px';
+          seg.span.style.margin = '0 1px';
+          
           if (!firstHighlightedSpan) firstHighlightedSpan = seg.span;
+          highlightedSpanCount++;
         }
       }
+      
+      console.log(`[Highlight] Applied highlighting to ${highlightedSpanCount} spans using ${matchMethod} method`);
       
       // Ensure the page is in view first, then center the first highlighted span
       pageContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -615,7 +741,15 @@ export const CustomPdfViewer = ({
         }, 150);
       }
     } else {
-      console.log(`[Highlight] No match found for "${queryLowerRaw}" after robust matching on page ${pageNum}`);
+      console.log(`[Highlight] No match found for "${queryLowerRaw}" after comprehensive search strategies on page ${pageNum}`);
+      console.log(`[Highlight] Debug info:`, {
+        combinedLength: combined.length,
+        normalizedLength: combinedNormLower.length,
+        mapLength: map.length,
+        queryLength: queryLowerRaw.length,
+        firstChars: combined.slice(0, 50),
+        normalizedFirstChars: combinedNormLower.slice(0, 50)
+      });
     }
   }, [buildRobustNormalizedWithMap, createTolerancePatterns]);
 
@@ -666,58 +800,68 @@ export const CustomPdfViewer = ({
         console.log(`[Search] Page ${pageNum}: built pageText length ${pageText.length}`);
         
         const pageTextLower = pageText.toLowerCase();
-        const { normalized: pageTextRobustNormLower } = buildRobustNormalizedWithMap(pageTextLower);
+        const { normalized: pageTextRobustNormLower, map } = buildRobustNormalizedWithMap(pageTextLower);
         
         let pageHasMatch = false;
+        let matchText = '';
+        let matchMethod = 'none';
+        let matchStartOriginal = -1;
         
-        // Try strict normalized first
+        // Strategy 1: Strict normalized search with mapping
         const strict = patterns.find(p => p.tolerance === 'strict');
-        if (strict && pageTextRobustNormLower.indexOf(strict.pattern as string) !== -1) {
-          console.log(`[Search] Page ${pageNum}: strict normalized match`);
-          results.push({
-            pageIndex: pageNum - 1,
-            textIndex: pageTextRobustNormLower.indexOf(strict.pattern as string),
-            rect: new DOMRect(),
-            text: strict.pattern as string
-          });
-          matches.push({ pageNum, text: strict.pattern as string });
-          pageHasMatch = true;
-        }
-
-        // Fallback: direct search on raw lowered text
-        if (!pageHasMatch) {
-          const directIdx = pageTextLower.indexOf(normalizeTextRobust(searchQuery).toLowerCase());
-          if (directIdx !== -1) {
-            console.log(`[Search] Page ${pageNum}: direct match on lowered text`);
-            results.push({
-              pageIndex: pageNum - 1,
-              textIndex: directIdx,
-              rect: new DOMRect(),
-              text: searchQuery
-            });
-            matches.push({ pageNum, text: searchQuery });
-            pageHasMatch = true;
+        if (!pageHasMatch && strict) {
+          const normIdx = pageTextRobustNormLower.indexOf(strict.pattern as string);
+          if (normIdx !== -1) {
+            const normEndIdx = normIdx + (strict.pattern as string).length - 1;
+            if (normIdx < map.length && normEndIdx < map.length) {
+              const startOrig = map[normIdx];
+              const endOrig = map[normEndIdx];
+              if (startOrig !== undefined && endOrig !== undefined) {
+                matchStartOriginal = startOrig;
+                matchText = pageText.slice(startOrig, endOrig + 1);
+                matchMethod = 'strict_normalized';
+                pageHasMatch = true;
+                console.log(`[Search] Page ${pageNum}: strict normalized match using mapping`);
+              }
+            }
           }
         }
 
-        // Tolerant regex patterns against robust normalized text
+        // Strategy 2: Direct search on raw lowered text
+        if (!pageHasMatch) {
+          const queryNorm = normalizeTextRobust(searchQuery).toLowerCase();
+          const directIdx = pageTextLower.indexOf(queryNorm);
+          if (directIdx !== -1) {
+            matchStartOriginal = directIdx;
+            matchText = pageText.slice(directIdx, directIdx + queryNorm.length);
+            matchMethod = 'direct_search';
+            pageHasMatch = true;
+            console.log(`[Search] Page ${pageNum}: direct match on lowered text`);
+          }
+        }
+
+        // Strategy 3: Tolerant regex patterns with mapping
         if (!pageHasMatch) {
           const tolerantPatterns = patterns.filter(p => (p as { isRegex?: boolean }).isRegex);
           for (const tolerant of tolerantPatterns) {
             try {
-              const re = new RegExp(tolerant.pattern as string);
+              const re = new RegExp(tolerant.pattern as string, 'i');
               const m = pageTextRobustNormLower.match(re);
               if (m && m.index !== undefined) {
-                console.log(`[Search] Page ${pageNum}: tolerant regex (${tolerant.tolerance}) match`);
-                results.push({
-                  pageIndex: pageNum - 1,
-                  textIndex: m.index,
-                  rect: new DOMRect(),
-                  text: m[0]
-                });
-                matches.push({ pageNum, text: m[0] });
-                pageHasMatch = true;
-                break;
+                const normIdx = m.index;
+                const normEndIdx = normIdx + m[0].length - 1;
+                if (normIdx < map.length && normEndIdx < map.length) {
+                  const startOrig = map[normIdx];
+                  const endOrig = map[normEndIdx];
+                  if (startOrig !== undefined && endOrig !== undefined) {
+                    matchStartOriginal = startOrig;
+                    matchText = pageText.slice(startOrig, endOrig + 1);
+                    matchMethod = `regex_${tolerant.tolerance}`;
+                    pageHasMatch = true;
+                    console.log(`[Search] Page ${pageNum}: tolerant regex (${tolerant.tolerance}) match using mapping`);
+                    break;
+                  }
+                }
               }
             } catch (e) {
               console.warn('[Search] Regex compilation failed for tolerant pattern', tolerant, e);
@@ -725,23 +869,45 @@ export const CustomPdfViewer = ({
           }
         }
 
-        // Extreme fallback: letters/digits only
+        // Strategy 4: Letters/digits only with heuristic mapping
         if (!pageHasMatch) {
           const lettersDigits = patterns.find(p => p.tolerance === 'letters_digits');
           if (lettersDigits) {
             const pageLettersDigitsOnly = pageTextLower.replace(/[^a-z0-9]/g, '');
-            if (pageLettersDigitsOnly.indexOf(lettersDigits.pattern as string) !== -1) {
-              console.log(`[Search] Page ${pageNum}: letters/digits-only fallback match`);
-              results.push({
-                pageIndex: pageNum - 1,
-                textIndex: 0,
-                rect: new DOMRect(),
-                text: lettersDigits.pattern as string
-              });
-              matches.push({ pageNum, text: lettersDigits.pattern as string });
+            const idx = pageLettersDigitsOnly.indexOf(lettersDigits.pattern as string);
+            if (idx !== -1) {
+              // Heuristic mapping back to original text
+              let charsSeen = 0;
+              let originalStart = 0;
+              for (let i = 0; i < pageTextLower.length && charsSeen < idx; i++) {
+                if (/[a-z0-9]/.test(pageTextLower[i])) {
+                  charsSeen++;
+                }
+                originalStart = i;
+              }
+              const approxLength = Math.min((lettersDigits.pattern as string).length * 2, pageText.length - originalStart);
+              matchStartOriginal = originalStart;
+              matchText = pageText.slice(originalStart, originalStart + approxLength);
+              matchMethod = 'letters_digits_heuristic';
               pageHasMatch = true;
+              console.log(`[Search] Page ${pageNum}: letters/digits-only fallback match using heuristic mapping`);
             }
           }
+        }
+        
+        // Add to results if match found
+        if (pageHasMatch && matchStartOriginal !== -1) {
+          results.push({
+            pageIndex: pageNum - 1,
+            textIndex: matchStartOriginal,
+            rect: new DOMRect(),
+            text: matchText
+          });
+          matches.push({ 
+            pageNum, 
+            text: matchText.slice(0, 100) + (matchText.length > 100 ? '...' : '')
+          });
+          console.log(`[Search] Page ${pageNum}: Added match using ${matchMethod} - "${matchText.slice(0, 50)}${matchText.length > 50 ? '...' : ''}"`);
         }
       }
       
