@@ -100,10 +100,32 @@ const globalRequestQueue = (() => {
 // Deduplicated, sequential fetch helper for extracted-content
 const inflightExtractedContent: Record<string, Promise<{ fileId: string; text: string; fileName: string }>> = {};
 function getExtractedContentSequential(rawRefId: string, sessionId: string) {
-  if (rawRefId in inflightExtractedContent) return inflightExtractedContent[rawRefId];
+  console.log(`🌐 getExtractedContentSequential called for ${rawRefId}, sessionId: ${sessionId}`);
+  
+  if (rawRefId in inflightExtractedContent) {
+    console.log(`♻️ Returning existing promise for ${rawRefId}`);
+    return inflightExtractedContent[rawRefId];
+  }
+  
+  console.log(`🆕 Creating new request for ${rawRefId}`);
   const p = globalRequestQueue
-    .enqueue(() => retryWithBackoff(() => chatService.getExtractedContentByRawRefId(rawRefId, sessionId)))
+    .enqueue(() => {
+      console.log(`📡 Making API call for ${rawRefId}`);
+      return retryWithBackoff(() => {
+        console.log(`🔄 Attempting API call to getExtractedContentByRawRefId for ${rawRefId}`);
+        return chatService.getExtractedContentByRawRefId(rawRefId, sessionId);
+      });
+    })
+    .then(result => {
+      console.log(`✅ API call successful for ${rawRefId}:`, result);
+      return result;
+    })
+    .catch(error => {
+      console.error(`❌ API call failed for ${rawRefId}:`, error);
+      throw error;
+    })
     .finally(() => {
+      console.log(`🧹 Cleaning up inflight request for ${rawRefId}`);
       delete inflightExtractedContent[rawRefId];
     }) as Promise<{ fileId: string; text: string; fileName: string }>;
   inflightExtractedContent[rawRefId] = p;
@@ -119,7 +141,7 @@ interface ChatReference {
 /* numbering helpers removed in favor of session-scoped persistent numbering */
 
 interface MessageBubbleProps {
-  role: 'user' | 'model';
+  role: 'user' | 'model' | 'assistant';
   firstContent: string;
   created_at: string;
   references?: ChatReference[];
@@ -255,20 +277,25 @@ export default function MessageBubble({
 
   // Parse content into segments preserving the order of text and references
   const parseContentIntoSegments = (content: string): Array<{ type: 'text' | 'reference'; content: string; tag?: { rawRefId?: string } }> => {
+    console.log('🔧 parseContentIntoSegments called with content:', content.substring(0, 500));
     const parts = content.split(/(\[REF\]|\[\/REF\])/);
+    console.log('🔧 Split parts:', parts.slice(0, 10)); // Show first 10 parts
     const segments: Array<{ type: 'text' | 'reference'; content: string; tag?: { rawRefId?: string } }> = [];
     let inReference = false;
     let currentRefSegment: { type: 'reference'; content: string; tag?: { rawRefId?: string } } | null = null;
     
-    parts.forEach(part => {
+    parts.forEach((part, index) => {
+      console.log(`🔧 Processing part ${index}: "${part}" (inReference: ${inReference})`);
       if (part === '[REF]') {
         inReference = true;
         currentRefSegment = { type: 'reference', content: '', tag: undefined };
         segments.push(currentRefSegment);
+        console.log('🔧 Started new reference segment');
       } else if (part === '[/REF]') {
         inReference = false;
         if (currentRefSegment) {
           const contentToParse = currentRefSegment.content.trim();
+          console.log(`🔧 Ending reference segment with content: "${contentToParse}"`);
           // New format: inside REF tags we only have the rawRefId as plain text
           if (contentToParse) {
             currentRefSegment.tag = { rawRefId: contentToParse };
@@ -280,6 +307,7 @@ export default function MessageBubble({
       } else {
         if (inReference && currentRefSegment) {
           currentRefSegment.content += part;
+          console.log(`🔧 Added to reference content: "${part}" (total: "${currentRefSegment.content}")`);
         } else {
           if (segments.length > 0 && segments[segments.length - 1].type === 'text') {
             segments[segments.length - 1].content += part;
@@ -290,22 +318,52 @@ export default function MessageBubble({
       }
     });
     
+    console.log('🔧 Final segments:', segments);
     return segments;
   };
   
   // Collect reference rawRefIds in order of appearance
   const referenceRawIds = useMemo(() => {
-    if (!content || role !== 'model') return [] as string[];
+    console.log('🔧 referenceRawIds useMemo triggered - content:', content ? content.substring(0, 100) + '...' : 'EMPTY', 'role:', role);
+    if (!content || (role !== 'model' && role !== 'assistant')) {
+      console.log('⚠️ Skipping reference parsing - content empty or role not model/assistant');
+      return [] as string[];
+    }
+    console.log('🔍 Parsing content for references:', content.substring(0, 200) + '...');
     const segments = parseContentIntoSegments(content);
-    return segments
+    console.log('📋 Parsed segments:', segments);
+    const rawIds = segments
       .filter(segment => segment.type === 'reference' && segment.tag?.rawRefId)
       .map(segment => segment.tag!.rawRefId!) as string[];
+    console.log('🎯 Extracted rawRefIds:', rawIds);
+    return rawIds;
   }, [content, role]);
 
   // When session changes, load number map from cache
   useEffect(() => {
     setTextToNumber(getRefNumCache());
   }, [currentSessionId, getRefNumCache]);
+
+  // Initialize textToNumber from cache when referenceRawIds are available and refIdToText is populated
+  useEffect(() => {
+    if (referenceRawIds.length === 0) return;
+    
+    // Check if we have text content for all references and numbers are missing
+    const hasAllTexts = referenceRawIds.every(id => refIdToText[id]);
+    const missingNumbers = referenceRawIds.some(id => {
+      const text = refIdToText[id];
+      if (!text) return false;
+      const key = normalizeText(text);
+      return textToNumber[key] == null;
+    });
+    
+    if (hasAllTexts && missingNumbers) {
+      const numCache = getRefNumCache();
+      if (Object.keys(numCache).length > 0) {
+        setTextToNumber({ ...numCache });
+      }
+    }
+  }, [referenceRawIds, refIdToText, textToNumber, getRefNumCache]);
 
   // Clear all in-memory reference state when session changes to prevent cross-chat leakage
   useEffect(() => {
@@ -343,6 +401,7 @@ export default function MessageBubble({
 
     // Fetch the missing ones SEQUENTIALLY to avoid 429s
     (async () => {
+      console.log('🔍 Starting sequential fetch for missing references:', missing);
       const textMapping: Record<string, string> = {};
       const fileIdMapping: Record<string, string> = {};
 
@@ -353,15 +412,22 @@ export default function MessageBubble({
         return na - nb;
       });
 
+      console.log('📋 Sorted missing references:', missingSorted);
+
       for (const rawRefId of missingSorted) {
         try {
+          console.log(`🚀 Fetching content for rawRefId: ${rawRefId}`);
           const extractedContent = await getExtractedContentSequential(rawRefId, currentSessionId || '');
+          console.log(`✅ Successfully fetched content for ${rawRefId}:`, extractedContent);
           textMapping[rawRefId] = extractedContent.text;
           fileIdMapping[rawRefId] = extractedContent.fileId;
         } catch (error) {
-          console.error(`Error fetching extracted content for ${rawRefId}:`, error);
+          console.error(`❌ Error fetching extracted content for ${rawRefId}:`, error);
         }
       }
+
+      console.log('📝 Final textMapping:', textMapping);
+      console.log('📁 Final fileIdMapping:', fileIdMapping);
 
       if (Object.keys(textMapping).length > 0) {
         setRefIdToText(prev => ({ ...prev, ...textMapping }));
@@ -371,7 +437,7 @@ export default function MessageBubble({
         setRefIdToFileId(prev => ({ ...prev, ...fileIdMapping }));
       }
     })();
-  }, [referenceRawIds, refIdToText, currentSessionId, getRefTextCache, setRefTextCache]);
+  }, [referenceRawIds, currentSessionId, getRefTextCache, setRefTextCache]);
 
   // Simple normalization to make deduplication more robust
   const normalizeText = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -380,42 +446,69 @@ export default function MessageBubble({
   useEffect(() => {
     if (referenceRawIds.length === 0) return;
 
+    console.log('🔢 Starting number assignment for references:', referenceRawIds);
+    console.log('📚 Current refIdToText:', refIdToText);
+    console.log('🏷️ Current textToNumber:', textToNumber);
+
     // Build ordered list of normalized texts for the visible message content
     const textsInOrder: string[] = [];
     for (const id of referenceRawIds) {
       const t = refIdToText[id];
-      if (!t) continue; // wait until text is available
+      if (!t) {
+        console.log(`⏳ Waiting for text content for ${id}`);
+        continue; // wait until text is available
+      }
       const key = normalizeText(t);
       if (key && !textsInOrder.includes(key)) {
         textsInOrder.push(key);
       }
     }
-    if (textsInOrder.length === 0) return;
+    
+    console.log('📝 Texts in order:', textsInOrder);
+    if (textsInOrder.length === 0) {
+      console.log('⚠️ No texts available yet, returning early');
+      return;
+    }
 
     // Load existing caches
     const numMap = getRefNumCache();
     let next = getNextCounter();
     let changed = false;
 
+    console.log('💾 Loaded numMap from cache:', numMap);
+    console.log('🔢 Next counter:', next);
+
     for (const key of textsInOrder) {
       if (numMap[key] == null) {
+        console.log(`➕ Assigning number ${next} to text key: ${key}`);
         numMap[key] = next;
         next += 1;
         changed = true;
+      } else {
+        console.log(`✅ Text key already has number ${numMap[key]}: ${key}`);
       }
     }
 
     if (changed) {
+      console.log('💾 Saving updated numMap to cache:', numMap);
       setRefNumCache(numMap);
       setNextCounter(next);
       setTextToNumber({ ...numMap });
     } else {
-      // Ensure local state is in sync if it was empty
-      if (Object.keys(textToNumber).length === 0 && Object.keys(numMap).length > 0) {
+      // Ensure local state is in sync if it was empty or doesn't contain all the numbers
+      const currentKeys = Object.keys(textToNumber);
+      const cacheKeys = Object.keys(numMap);
+      const needsSync = currentKeys.length === 0 || 
+        textsInOrder.some(key => textToNumber[key] == null && numMap[key] != null);
+      
+      console.log('🔄 Checking if sync needed:', { currentKeys, cacheKeys, needsSync });
+      
+      if (needsSync && cacheKeys.length > 0) {
+        console.log('🔄 Syncing textToNumber from cache');
         setTextToNumber({ ...numMap });
       }
     }
-  }, [referenceRawIds, refIdToText, currentSessionId, textToNumber, getRefNumCache, getNextCounter, setRefNumCache, setNextCounter]);
+  }, [referenceRawIds, refIdToText, currentSessionId, getRefNumCache, getNextCounter, setRefNumCache, setNextCounter]);
 
   // Load file paths for references when new reference IDs are found (we still support showing file path if needed)
   useEffect(() => {
@@ -456,7 +549,7 @@ export default function MessageBubble({
       })();
     }, 300);
     return () => clearTimeout(timer);
-  }, [referenceRawIds, filePaths, loadingPaths, refIdToFileId, currentSessionId]);
+  }, [referenceRawIds, currentSessionId]);
   
   const handleShowFileWrapper = async (rawRefId: string) => {
     if (!rawRefId) {
@@ -500,6 +593,7 @@ export default function MessageBubble({
   // Render a numbered inline button for a reference
   const renderReferenceInlineButton = (rawRefId: string | undefined, key: number | string) => {
     if (!rawRefId) {
+      console.log(`🚫 No rawRefId provided for key: ${key}`);
       return (
         <span key={`ref-${key}`} className="align-baseline ml-1 inline-flex items-center text-xs text-text-secondary">[?]</span>
       );
@@ -508,8 +602,15 @@ export default function MessageBubble({
     const textContent = refIdToText[rawRefId];
     const isOpening = loadingRefAction === rawRefId;
 
+    console.log(`🎯 Rendering reference button for ${rawRefId}:`, {
+      textContent: textContent ? 'available' : 'missing',
+      isOpening,
+      textToNumber: Object.keys(textToNumber).length
+    });
+
     // Show spinner while loading text or waiting for number assignment
     if (!textContent) {
+      console.log(`⏳ No text content for ${rawRefId}, showing spinner`);
       return (
         <span key={`ref-${key}`} className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-secondary text-text-primary border border-secondary rounded">
           <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
@@ -520,7 +621,14 @@ export default function MessageBubble({
     const keyNorm = normalizeText(textContent);
     const number = textToNumber[keyNorm];
 
+    console.log(`🔍 Looking up number for ${rawRefId}:`, {
+      keyNorm,
+      number,
+      textToNumberKeys: Object.keys(textToNumber)
+    });
+
     if (!number) {
+      console.log(`❌ No number assigned for ${rawRefId} (key: ${keyNorm}), showing spinner`);
       return (
         <span key={`ref-${key}`} className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-secondary text-text-primary border border-secondary rounded">
           <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
@@ -528,11 +636,13 @@ export default function MessageBubble({
       );
     }
 
+    console.log(`✅ Rendering numbered button ${number} for ${rawRefId}`);
+
     return (
       <button
         key={`ref-${key}`}
         type="button"
-        className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-secondary text-text-primary border border-secondary rounded hover:bg-secondary-300 transition-colors cursor-pointer"
+        className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-accent text-primary border border-accent rounded hover:bg-accent-300 transition-colors cursor-pointer"
         onClick={() => handleShowFileWrapper(rawRefId)}
         onMouseDown={(e) => e.preventDefault()} // Prevent focus shift that could trigger scroll
         tabIndex={-1} // Make button non-focusable to prevent scroll-into-view
