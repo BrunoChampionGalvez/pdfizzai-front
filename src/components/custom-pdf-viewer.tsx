@@ -821,12 +821,11 @@ export const CustomPdfViewer = ({
       const segments = detectAndSplitPageBreaks(searchQuery);
       console.log('[Search] Split into segments:', segments.map((s, i) => `${i}: "${s.slice(0, 50)}..."`));
       
-      // Find the best page that contains the most segments
-      let bestPageNum = 1;
-      let maxSegmentsFound = 0;
+      // Track which segments are found on which pages
+      const segmentMatches: Array<{pageNum: number, segments: string[], segmentCount: number}> = [];
       
       for (let pageNum = 1; pageNum <= pdfDocRef.current.numPages; pageNum++) {
-        let segmentsFoundOnPage = 0;
+        const foundSegments: string[] = [];
         
         try {
           const page = await pdfDocRef.current.getPage(pageNum);
@@ -844,9 +843,9 @@ export const CustomPdfViewer = ({
           
           const pageTextLower = pageText.toLowerCase();
           
-          // Count how many segments can be found on this page
+          // Check which segments can be found on this page
           for (const segment of segments) {
-            if (segment.length > 3) { // Only count meaningful segments
+            if (segment.length > 3) { // Only check meaningful segments
               const segmentPatterns = createTolerancePatterns(segment);
               const hasMatch = segmentPatterns.some(pattern => {
                 if (pattern.isRegex) {
@@ -862,14 +861,17 @@ export const CustomPdfViewer = ({
               });
               
               if (hasMatch) {
-                segmentsFoundOnPage++;
+                foundSegments.push(segment);
               }
             }
           }
           
-          if (segmentsFoundOnPage > maxSegmentsFound) {
-            maxSegmentsFound = segmentsFoundOnPage;
-            bestPageNum = pageNum;
+          if (foundSegments.length > 0) {
+            segmentMatches.push({
+              pageNum,
+              segments: foundSegments,
+              segmentCount: foundSegments.length
+            });
           }
           
         } catch (error) {
@@ -877,39 +879,55 @@ export const CustomPdfViewer = ({
         }
       }
       
-      console.log(`[Search] Best match page ${bestPageNum} with ${maxSegmentsFound}/${segments.length} segments found`);
+      console.log('[Search] Segment matches found:', segmentMatches.map(m => 
+        `Page ${m.pageNum}: ${m.segmentCount} segments - ${m.segments.map(s => `"${s.slice(0, 30)}..."`).join(', ')}`
+      ));
       
-      if (maxSegmentsFound > 0) {
-        // Add results for the best page and highlight using the first segment
-        const firstMeaningfulSegment = segments.find(s => s.length > 3) || segments[0];
+      if (segmentMatches.length > 0) {
+        // Find the page with the most segments to scroll to first
+        const bestMatch = segmentMatches.reduce((best, current) => 
+          current.segmentCount > best.segmentCount ? current : best
+        );
         
-        results.push({
-          pageIndex: bestPageNum - 1,
-          textIndex: 0,
-          rect: new DOMRect(),
-          text: firstMeaningfulSegment
+        // Add results for all pages with segments
+        segmentMatches.forEach((match, index) => {
+          const firstSegment = match.segments[0];
+          results.push({
+            pageIndex: match.pageNum - 1,
+            textIndex: 0,
+            rect: new DOMRect(),
+            text: firstSegment
+          });
+          
+          matches.push({ 
+            pageNum: match.pageNum, 
+            text: `Page ${match.pageNum}: ${match.segmentCount}/${segments.length} segments`
+          });
         });
         
-        matches.push({ 
-          pageNum: bestPageNum, 
-          text: `Multi-segment match (${maxSegmentsFound}/${segments.length} segments)`
-        });
-        
-        // Render and highlight the best page with segments
-        await renderPage(bestPageNum, scale);
-        
-        // Highlight each segment found on this page
-        for (const segment of segments) {
-          if (segment.length > 3) {
+        // Render and highlight all pages with segments
+        for (const match of segmentMatches) {
+          await renderPage(match.pageNum, scale);
+          
+          // Highlight each segment found on this page
+          for (const segment of match.segments) {
             try {
-              await highlightTextInPage(bestPageNum, segment);
+              await highlightTextInPage(match.pageNum, segment);
             } catch (error) {
-              console.warn(`[Search] Could not highlight segment "${segment.slice(0, 30)}...":`, error);
+              console.warn(`[Search] Could not highlight segment "${segment.slice(0, 30)}..." on page ${match.pageNum}:`, error);
             }
           }
         }
         
+        // Scroll to the page with the most segments
+        const pageContainer = canvasContainerRef.current?.querySelector(`#container-page-${bestMatch.pageNum}`) as HTMLElement;
+        if (pageContainer) {
+          pageContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
         setCurrentSearchResultIndex(0);
+        setSearchResults(results);
+        setAllMatches(matches);
       }
       
     } else {
@@ -1083,8 +1101,23 @@ export const CustomPdfViewer = ({
     setCurrentSearchResultIndex(nextIndex);
     clearHighlights();
     await renderPage(nextMatch.pageNum, scale);
-    await highlightTextInPage(nextMatch.pageNum, manualSearchQuery);
-  }, [allMatches, currentSearchResultIndex, manualSearchQuery, clearHighlights, renderPage, scale, highlightTextInPage]);
+
+    // If the manual search includes page breaks, highlight segments on this page
+    if (isTextWithPageBreaks(manualSearchQuery)) {
+      const segments = detectAndSplitPageBreaks(manualSearchQuery);
+      for (const segment of segments) {
+        if (segment.length > 3) {
+          try {
+            await highlightTextInPage(nextMatch.pageNum, segment);
+          } catch (err) {
+            console.warn(`[Nav] Could not highlight segment on page ${nextMatch.pageNum}:`, err);
+          }
+        }
+      }
+    } else {
+      await highlightTextInPage(nextMatch.pageNum, manualSearchQuery);
+    }
+  }, [allMatches, currentSearchResultIndex, manualSearchQuery, clearHighlights, renderPage, scale, highlightTextInPage, isTextWithPageBreaks, detectAndSplitPageBreaks]);
 
   // Scroll to a specific page
   const scrollToPage = useCallback((pageNum: number) => {
