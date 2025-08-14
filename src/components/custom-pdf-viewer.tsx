@@ -890,7 +890,7 @@ export const CustomPdfViewer = ({
         );
         
         // Add results for all pages with segments
-        segmentMatches.forEach((match, index) => {
+        segmentMatches.forEach((match) => {
           const firstSegment = match.segments[0];
           results.push({
             pageIndex: match.pageNum - 1,
