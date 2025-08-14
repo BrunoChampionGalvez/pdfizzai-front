@@ -563,6 +563,44 @@ export const CustomPdfViewer = ({
     return patterns;
   }, [buildRobustNormalizedWithMap]);
 
+  // Utility functions for handling page breaks in extracted content
+  const detectAndSplitPageBreaks = useCallback((text: string): string[] => {
+    if (!text || typeof text !== 'string') {
+      return [text || ''];
+    }
+
+    const pageBreakPatterns = [
+      /\s*---\s*Page\s*Break\s*---\s*/gi,
+      /\s*---\s*PAGE\s*BREAK\s*---\s*/gi,
+      /\s*---\s*page\s*break\s*---\s*/gi,
+      /\s*\[\s*PAGE\s*BREAK\s*\]\s*/gi,
+      /\s*\[\s*page\s*break\s*\]\s*/gi,
+    ];
+
+    let segments = [text];
+    for (const pattern of pageBreakPatterns) {
+      const next: string[] = [];
+      for (const seg of segments) {
+        next.push(...seg.split(pattern));
+      }
+      segments = next;
+    }
+
+    return segments.map(s => s.trim()).filter(Boolean);
+  }, []);
+
+  const isTextWithPageBreaks = useCallback((text: string): boolean => {
+    if (!text || typeof text !== 'string') return false;
+    const pageBreakPatterns = [
+      /---\s*Page\s*Break\s*---/i,
+      /---\s*PAGE\s*BREAK\s*---/i,
+      /---\s*page\s*break\s*---/i,
+      /\[\s*PAGE\s*BREAK\s*\]/i,
+      /\[\s*page\s*break\s*\]/i,
+    ];
+    return pageBreakPatterns.some(p => p.test(text));
+  }, []);
+
   // Highlight text in specific page with enhanced mapping
   const highlightTextInPage = useCallback(async (pageNum: number, searchQuery: string) => {
     if (!canvasContainerRef.current) return;
@@ -766,6 +804,7 @@ export const CustomPdfViewer = ({
     console.log('[Search] searchText called', {
       raw: searchQuery,
       length: searchQuery.length,
+      hasPageBreaks: isTextWithPageBreaks(searchQuery)
     });
 
     // Clear existing highlights
@@ -773,7 +812,109 @@ export const CustomPdfViewer = ({
     
     const results: SearchResult[] = [];
     const matches: Array<{pageNum: number, text: string}> = [];
-    const patterns = createTolerancePatterns(searchQuery);
+    
+    // Check if searchQuery contains page breaks
+    if (isTextWithPageBreaks(searchQuery)) {
+      console.log('[Search] Text contains page breaks, using segment-based search');
+      
+      // Split into segments and search for each one
+      const segments = detectAndSplitPageBreaks(searchQuery);
+      console.log('[Search] Split into segments:', segments.map((s, i) => `${i}: "${s.slice(0, 50)}..."`));
+      
+      // Find the best page that contains the most segments
+      let bestPageNum = 1;
+      let maxSegmentsFound = 0;
+      
+      for (let pageNum = 1; pageNum <= pdfDocRef.current.numPages; pageNum++) {
+        let segmentsFoundOnPage = 0;
+        
+        try {
+          const page = await pdfDocRef.current.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          
+          let pageText = '';
+          textContent.items.forEach((item) => {
+            if ('str' in item) {
+              pageText += item.str;
+              if (item.str && !item.str.match(/\s$/)) {
+                pageText += ' ';
+              }
+            }
+          });
+          
+          const pageTextLower = pageText.toLowerCase();
+          
+          // Count how many segments can be found on this page
+          for (const segment of segments) {
+            if (segment.length > 3) { // Only count meaningful segments
+              const segmentPatterns = createTolerancePatterns(segment);
+              const hasMatch = segmentPatterns.some(pattern => {
+                if (pattern.isRegex) {
+                  try {
+                    const re = new RegExp(pattern.pattern as string, 'i');
+                    return re.test(pageTextLower);
+                  } catch {
+                    return false;
+                  }
+                } else {
+                  return pageTextLower.includes((pattern.pattern as string).toLowerCase());
+                }
+              });
+              
+              if (hasMatch) {
+                segmentsFoundOnPage++;
+              }
+            }
+          }
+          
+          if (segmentsFoundOnPage > maxSegmentsFound) {
+            maxSegmentsFound = segmentsFoundOnPage;
+            bestPageNum = pageNum;
+          }
+          
+        } catch (error) {
+          console.error(`[Search] Error processing page ${pageNum}:`, error);
+        }
+      }
+      
+      console.log(`[Search] Best match page ${bestPageNum} with ${maxSegmentsFound}/${segments.length} segments found`);
+      
+      if (maxSegmentsFound > 0) {
+        // Add results for the best page and highlight using the first segment
+        const firstMeaningfulSegment = segments.find(s => s.length > 3) || segments[0];
+        
+        results.push({
+          pageIndex: bestPageNum - 1,
+          textIndex: 0,
+          rect: new DOMRect(),
+          text: firstMeaningfulSegment
+        });
+        
+        matches.push({ 
+          pageNum: bestPageNum, 
+          text: `Multi-segment match (${maxSegmentsFound}/${segments.length} segments)`
+        });
+        
+        // Render and highlight the best page with segments
+        await renderPage(bestPageNum, scale);
+        
+        // Highlight each segment found on this page
+        for (const segment of segments) {
+          if (segment.length > 3) {
+            try {
+              await highlightTextInPage(bestPageNum, segment);
+            } catch (error) {
+              console.warn(`[Search] Could not highlight segment "${segment.slice(0, 30)}...":`, error);
+            }
+          }
+        }
+        
+        setCurrentSearchResultIndex(0);
+      }
+      
+    } else {
+      // Original single-text search logic
+      const patterns = createTolerancePatterns(searchQuery);
 
     try {
       // Search through all pages
@@ -930,7 +1071,7 @@ export const CustomPdfViewer = ({
     } catch (error) {
       console.error('Error searching text:', error);
     }
-  }, [pdfDocRef, clearHighlights, renderPage, scale, createTolerancePatterns, buildRobustNormalizedWithMap, normalizeTextRobust, highlightTextInPage]);
+  }}, [pdfDocRef, clearHighlights, renderPage, scale, createTolerancePatterns, buildRobustNormalizedWithMap, normalizeTextRobust, highlightTextInPage, isTextWithPageBreaks, detectAndSplitPageBreaks]);
 
   // Navigate to next search result
   const goToNextMatch = useCallback(async () => {
