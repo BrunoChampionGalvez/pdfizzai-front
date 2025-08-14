@@ -58,38 +58,52 @@ async function retryWithBackoff<T>(
 }
 
 // Global request queue to ensure all extracted-content calls are sequential across all components
+interface QueueItem {
+  task: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (reason?: unknown) => void;
+}
+
 const globalRequestQueue = (() => {
-  const queue: Array<() => Promise<unknown>> = [];
+  const queue: Array<QueueItem> = [];
   let processing = false;
 
   const processQueue = async () => {
     if (processing || queue.length === 0) return;
     processing = true;
 
+    console.log(`🔄 Starting queue processing with ${queue.length} items`);
+
     while (queue.length > 0) {
-      const task = queue.shift()!;
+      const { task, resolve, reject } = queue.shift()!;
       try {
-        await task();
+        console.log(`📡 Processing queue item, ${queue.length} remaining`);
+        const result = await task();
+        resolve(result);
+        console.log(`✅ Queue item completed successfully`);
       } catch (error) {
-        console.error('Queue task failed:', error);
+        console.error('❌ Queue task failed:', error);
+        reject(error);
       }
-      // Small delay between requests to be extra safe
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Increased delay between requests to prevent 429 errors
+      if (queue.length > 0) {
+        console.log(`⏳ Waiting 500ms before next request...`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
 
     processing = false;
+    console.log(`🏁 Queue processing completed`);
   };
 
   return {
-    enqueue: (task: () => Promise<unknown>) => {
-      return new Promise((resolve, reject) => {
-        queue.push(async () => {
-          try {
-            const result = await task();
-            resolve(result);
-          } catch (error) {
-            reject(error);
-          }
+    enqueue: <T,>(task: () => Promise<T>): Promise<T> => {
+      return new Promise<T>((resolve, reject) => {
+        console.log(`➕ Adding task to queue (current size: ${queue.length})`);
+        queue.push({ 
+          task: task as () => Promise<unknown>, 
+          resolve: resolve as (value: unknown) => void, 
+          reject: reject as (reason?: unknown) => void 
         });
         processQueue();
       });
@@ -99,12 +113,23 @@ const globalRequestQueue = (() => {
 
 // Deduplicated, sequential fetch helper for extracted-content
 const inflightExtractedContent: Record<string, Promise<{ fileId: string; text: string; fileName: string }>> = {};
+// Global cache to prevent duplicate requests across all components
+const globalExtractedContentCache: Record<string, { fileId: string; text: string; fileName: string }> = {};
+
 function getExtractedContentSequential(rawRefId: string, sessionId: string) {
   console.log(`🌐 getExtractedContentSequential called for ${rawRefId}, sessionId: ${sessionId}`);
   
-  if (rawRefId in inflightExtractedContent) {
+  // Check global cache first
+  const cacheKey = `${sessionId}_${rawRefId}`;
+  if (globalExtractedContentCache[cacheKey]) {
+    console.log(`💾 Returning cached result for ${rawRefId}`);
+    return Promise.resolve(globalExtractedContentCache[cacheKey]);
+  }
+  
+  // Check if request is already in flight
+  if (cacheKey in inflightExtractedContent) {
     console.log(`♻️ Returning existing promise for ${rawRefId}`);
-    return inflightExtractedContent[rawRefId];
+    return inflightExtractedContent[cacheKey];
   }
   
   console.log(`🆕 Creating new request for ${rawRefId}`);
@@ -118,6 +143,8 @@ function getExtractedContentSequential(rawRefId: string, sessionId: string) {
     })
     .then(result => {
       console.log(`✅ API call successful for ${rawRefId}:`, result);
+      // Cache the result globally
+      globalExtractedContentCache[cacheKey] = result;
       return result;
     })
     .catch(error => {
@@ -126,9 +153,9 @@ function getExtractedContentSequential(rawRefId: string, sessionId: string) {
     })
     .finally(() => {
       console.log(`🧹 Cleaning up inflight request for ${rawRefId}`);
-      delete inflightExtractedContent[rawRefId];
+      delete inflightExtractedContent[cacheKey];
     }) as Promise<{ fileId: string; text: string; fileName: string }>;
-  inflightExtractedContent[rawRefId] = p;
+  inflightExtractedContent[cacheKey] = p;
   return p;
 }
 
@@ -400,42 +427,33 @@ export default function MessageBubble({
     if (missing.length === 0) return;
 
     // Fetch the missing ones SEQUENTIALLY to avoid 429s
+    console.log('🔍 Starting sequential fetch for missing references:', missing);
+    
+    // sort numerically by trailing digits (reference number) to maintain stable ordering
+    const missingSorted = [...missing].sort((a, b) => {
+      const na = parseInt(a.match(/(\d+)$/)?.[1] || '0', 10);
+      const nb = parseInt(b.match(/(\d+)$/)?.[1] || '0', 10);
+      return na - nb;
+    });
+
+    console.log('📋 Sorted missing references:', missingSorted);
+
+    // Process each reference through the global queue to ensure sequential execution
+    // Use an async IIFE to properly await each request before starting the next
     (async () => {
-      console.log('🔍 Starting sequential fetch for missing references:', missing);
-      const textMapping: Record<string, string> = {};
-      const fileIdMapping: Record<string, string> = {};
-
-      // sort numerically by trailing digits (reference number) to maintain stable ordering
-      const missingSorted = [...missing].sort((a, b) => {
-        const na = parseInt(a.match(/(\d+)$/)?.[1] || '0', 10);
-        const nb = parseInt(b.match(/(\d+)$/)?.[1] || '0', 10);
-        return na - nb;
-      });
-
-      console.log('📋 Sorted missing references:', missingSorted);
-
       for (const rawRefId of missingSorted) {
         try {
-          console.log(`🚀 Fetching content for rawRefId: ${rawRefId}`);
+          console.log(`🚀 Processing reference ${rawRefId}`);
           const extractedContent = await getExtractedContentSequential(rawRefId, currentSessionId || '');
           console.log(`✅ Successfully fetched content for ${rawRefId}:`, extractedContent);
-          textMapping[rawRefId] = extractedContent.text;
-          fileIdMapping[rawRefId] = extractedContent.fileId;
+          setRefIdToText(prev => ({ ...prev, [rawRefId]: extractedContent.text }));
+          setRefIdToFileId(prev => ({ ...prev, [rawRefId]: extractedContent.fileId }));
+          setRefTextCache({ [rawRefId]: extractedContent.text });
         } catch (error) {
           console.error(`❌ Error fetching extracted content for ${rawRefId}:`, error);
         }
       }
-
-      console.log('📝 Final textMapping:', textMapping);
-      console.log('📁 Final fileIdMapping:', fileIdMapping);
-
-      if (Object.keys(textMapping).length > 0) {
-        setRefIdToText(prev => ({ ...prev, ...textMapping }));
-        setRefTextCache(textMapping);
-      }
-      if (Object.keys(fileIdMapping).length > 0) {
-        setRefIdToFileId(prev => ({ ...prev, ...fileIdMapping }));
-      }
+      console.log(`🏁 Completed processing all ${missingSorted.length} references`);
     })();
   }, [referenceRawIds, currentSessionId, getRefTextCache, setRefTextCache]);
 
