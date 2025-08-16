@@ -64,15 +64,15 @@ export default function Navbar() {
   return (
     <nav className="bg-background-header border-b border-secondary">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
+        <div className="flex justify-between items-center h-22">
           {/* Logo */}
           <div className="flex items-center">
             <Link href="/" className="flex items-center">
               <Image 
                 src="/pdfizz-ai-official-logo.png" 
                 alt="PDFizz AI Logo" 
-                width={150} 
-                height={150}
+                width={120} 
+                height={120}
               />
             </Link>
           </div>
@@ -82,13 +82,13 @@ export default function Navbar() {
             <div className="ml-10 flex items-baseline space-x-8">
               <Link 
                 href="/" 
-                className="text-text-primary hover:text-accent transition-colors duration-200 px-3 py-2 rounded-md text-sm font-medium"
+                className="text-text-primary hover:text-accent transition-colors duration-200 px-3 py-2 rounded-md text-md font-medium"
               >
                 Home
               </Link>
               <Link 
                 href="/pricing" 
-                className="text-text-primary hover:text-accent transition-colors duration-200 px-3 py-2 rounded-md text-sm font-medium"
+                className="text-text-primary hover:text-accent transition-colors duration-200 px-3 py-2 rounded-md text-md font-medium"
               >
                 Pricing
               </Link>

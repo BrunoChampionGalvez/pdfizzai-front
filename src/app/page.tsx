@@ -62,8 +62,8 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-primary flex items-center justify-center">
       <div className="max-w-4xl mx-auto px-6 text-center">
-        <h1 className="flex justify-center items-center text-5xl font-bold text-text-primary mb-8"
-        style={{ height: 100, overflowY: 'hidden' }}>
+        <h1 className="flex justify-center items-center text-5xl font-bold text-text-primary mb-14"
+        style={{ height: 100 }}>
           <span>Welcome to</span> 
           <Image src="/pdfizz-ai-official-logo.png" width={300} height={300} alt='PDFizz AI Logo'></Image>
         </h1>
