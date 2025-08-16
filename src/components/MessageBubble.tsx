@@ -6,6 +6,7 @@ import { usePDFViewer } from '../contexts/PDFViewerContext';
 import { formatTime } from '../lib/utils';
 import { MentionedMaterial } from '../types/chat';
 import { chatService } from '../services/chat';
+import { useToast } from './ToastProvider';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -168,6 +169,7 @@ interface ChatReference {
 /* numbering helpers removed in favor of session-scoped persistent numbering */
 
 interface MessageBubbleProps {
+  messageId: string;
   role: 'user' | 'model' | 'assistant';
   firstContent: string;
   created_at: string;
@@ -177,6 +179,7 @@ interface MessageBubbleProps {
 }
 
 export default function MessageBubble({ 
+  messageId,
   role,
   firstContent, 
   created_at, 
@@ -185,7 +188,9 @@ export default function MessageBubble({
 }: MessageBubbleProps) {
   const { setCurrentReference, currentSessionId } = useChatStore();
   const { handleShowFile } = usePDFViewer();
+  const { showSuccess } = useToast();
   const [loadingRefAction, setLoadingRefAction] = useState<string | null>(null);
+  const [reloadingRef, setReloadingRef] = useState<string | null>(null);
   const [filePaths, setFilePaths] = useState<Record<string, string>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, boolean>>({});
   const [content, setContent] = useState<string>(firstContent || '');
@@ -608,6 +613,83 @@ export default function MessageBubble({
     }
   };
 
+  // Handle reload reference functionality
+  const handleReloadReference = async (rawRefId: string) => {
+    if (!rawRefId || !currentSessionId) {
+      console.error('Invalid rawRefId or sessionId for reload');
+      return;
+    }
+
+    setReloadingRef(rawRefId);
+    try {
+      // Get the current extracted content to get both the text and the actual id
+      const extractedContent = await getExtractedContentSequential(rawRefId, currentSessionId);
+      const textToSearch = extractedContent.text;
+      
+      // Get the full extracted content entity to access the id field
+      const fullExtractedContent = await chatService.getExtractedContentByRawRefId(rawRefId, currentSessionId);
+      const referenceId = fullExtractedContent.id; // Use the actual id, not rawRefId
+      
+      // Call the loadReferenceAgain service
+      await chatService.loadReferenceAgain(
+        messageId,
+        textToSearch,
+        content, // The whole message text
+        referenceId
+      );
+      
+      // Update the extracted content cache with the new data
+      const updatedContent = await chatService.getExtractedContentByRawRefId(rawRefId, currentSessionId);
+      
+      // Preserve the original number assignment before updating text
+      const oldTextContent = refIdToText[rawRefId];
+      const oldKeyNorm = oldTextContent ? normalizeText(oldTextContent) : null;
+      const preservedNumber = oldKeyNorm ? textToNumber[oldKeyNorm] : null;
+      
+      // Update local caches
+      setRefIdToText(prev => ({ ...prev, [rawRefId]: updatedContent.text }));
+      setRefIdToFileId(prev => ({ ...prev, [rawRefId]: updatedContent.fileId }));
+      setRefTextCache({ [rawRefId]: updatedContent.text });
+      
+      // Update global cache
+      globalExtractedContentCache[rawRefId] = updatedContent;
+      
+      // Preserve the number assignment for the new text content
+      if (preservedNumber && updatedContent.text) {
+        const newKeyNorm = normalizeText(updatedContent.text);
+        
+        // Update both local state and global cache to preserve the number
+        const numMap = getRefNumCache();
+        
+        // Remove old mapping if it exists and is different
+        if (oldKeyNorm && oldKeyNorm !== newKeyNorm && numMap[oldKeyNorm] === preservedNumber) {
+          delete numMap[oldKeyNorm];
+        }
+        
+        // Assign the preserved number to the new text in global cache
+        numMap[newKeyNorm] = preservedNumber;
+        setRefNumCache(numMap);
+        
+        // Update local state
+        setTextToNumber(prev => {
+          const updated = { ...prev };
+          if (oldKeyNorm && oldKeyNorm !== newKeyNorm) {
+            delete updated[oldKeyNorm];
+          }
+          updated[newKeyNorm] = preservedNumber;
+          return updated;
+        });
+      }
+      
+      console.log('Reference reloaded successfully:', rawRefId);
+      showSuccess('Reference reloaded successfully', 'You can proceed to use it');
+    } catch (error) {
+      console.error('Error reloading reference:', error);
+    } finally {
+      setReloadingRef(null);
+    }
+  };
+
   // Render a numbered inline button for a reference
   const renderReferenceInlineButton = (rawRefId: string | undefined, key: number | string) => {
     if (!rawRefId) {
@@ -656,23 +738,46 @@ export default function MessageBubble({
 
     console.log(`✅ Rendering numbered button ${number} for ${rawRefId}`);
 
+    const isReloading = reloadingRef === rawRefId;
+
     return (
-      <button
-        key={`ref-${key}`}
-        type="button"
-        className="ml-1 inline-flex items-center justify-center align-baseline h-5 min-w-[1.25rem] px-1 text-xs font-semibold bg-accent text-primary border border-accent rounded hover:bg-accent-300 transition-colors cursor-pointer"
-        onClick={() => handleShowFileWrapper(rawRefId)}
-        onMouseDown={(e) => e.preventDefault()} // Prevent focus shift that could trigger scroll
-        tabIndex={-1} // Make button non-focusable to prevent scroll-into-view
-        disabled={isOpening}
-        title={`Reference ${number}`}
-      >
-        {isOpening ? (
-          <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
-        ) : (
-          <span>{number}</span>
-        )}
-      </button>
+      <span key={`ref-${key}`} className="ml-1 relative inline-flex items-center align-baseline group">
+        {/* Reload button - positioned exactly behind the reference button */}
+        <button
+          type="button"
+          className="absolute inset-0 z-0 inline-flex items-center justify-center h-7 w-6 text-xs font-semibold bg-gray-200 text-gray-600 border border-gray-300 rounded-t hover:bg-gray-300 transition-all duration-200 opacity-0 group-hover:opacity-100 group-hover:translate-y-[-85%] group-hover:z-10 cursor-pointer"
+          onClick={() => handleReloadReference(rawRefId)}
+          onMouseDown={(e) => e.preventDefault()}
+          tabIndex={-1}
+          disabled={isReloading || isOpening}
+          title="Reload reference: Sometimes references can fail, this helps reload them."
+        >
+          {isReloading ? (
+            <span className="w-3 h-3 border-2 border-gray-600 border-t-transparent rounded-full animate-spin inline-block" />
+          ) : (
+            <svg className="absolute top-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          )}
+        </button>
+        
+        {/* Main reference button */}
+        <button
+          type="button"
+          className="relative z-20 inline-flex items-center justify-center align-baseline h-6 w-6 px-1 text-xs font-semibold bg-accent text-primary border border-accent rounded hover:bg-accent-300 transition-colors cursor-pointer"
+          onClick={() => handleShowFileWrapper(rawRefId)}
+          onMouseDown={(e) => e.preventDefault()}
+          tabIndex={-1}
+          disabled={isOpening}
+          title={`Click to show Reference ${number}`}
+        >
+          {isOpening || isReloading ? (
+            <span className="w-3 h-3 border-2 border-text-primary border-t-transparent rounded-full animate-spin inline-block" />
+          ) : (
+            <span>{number}</span>
+          )}
+        </button>
+      </span>
     );
   };
 

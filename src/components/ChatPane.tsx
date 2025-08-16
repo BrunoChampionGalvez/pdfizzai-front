@@ -686,7 +686,7 @@ export default function ChatPane() {
                       )}
                     </div>
                   )}
-                  <div className="flex items-center bg-primary border border-secondary rounded-md overflow-hidden">
+                  <div className="flex items-center bg-primary border border-secondary rounded-md overflow-hidden z-30">
                     <span className="text-lg font-medium px-2 text-text-secondary">@</span>
                     <input
                       ref={searchInputRef}
@@ -738,7 +738,7 @@ export default function ChatPane() {
                 </div>
               )}
 
-              <div className="flex items-end w-full min-h-[4rem]">
+              <div className="flex items-end w-full min-h-[4rem] relative z-50">
                 <textarea
                   value={message}
                   onChange={handleMessageChange}
@@ -792,6 +792,7 @@ export default function ChatPane() {
             {messages.map(message => (
               <MessageBubble
                 key={message.id}
+                messageId={message.id}
                 role={message.role}
                 firstContent={message.content}
                 created_at={message.created_at}
@@ -806,7 +807,7 @@ export default function ChatPane() {
       </div>
 
       {(messages.length > 0 || !isNewSession || isSidePanelMode) && (
-        <div className="p-4 animate-slideUp absolute bottom-6 left-0 right-0">
+        <div className="p-4 animate-slideUp absolute bottom-6 left-0 right-0 z-40">
           {/* Selected materials display */}
           {selectedMaterials.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
@@ -864,7 +865,7 @@ export default function ChatPane() {
                   )}
                 </div>
               )}
-              <div className="flex items-center bg-primary border border-secondary rounded-md overflow-hidden">
+              <div className="flex items-center bg-primary border border-secondary rounded-md overflow-hidden z-30">
                 <span className="text-lg font-medium px-2 text-text-secondary">@</span>
                 <input
                   ref={searchInputRef}
@@ -916,7 +917,7 @@ export default function ChatPane() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="flex items-end">
+          <form onSubmit={handleSubmit} className="flex items-end relative z-50">
             <textarea
               value={message}
               onChange={handleMessageChange}

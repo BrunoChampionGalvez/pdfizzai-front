@@ -228,8 +228,8 @@ export const chatService = {
     }
   },
 
-  async loadReferenceAgain(referenceId: string, messageId: string, textToSearch: string, chatMessage: string): Promise<string> {
-    console.log(`Inside loadReferenceAgain Service: ${referenceId}, ${messageId}, ${textToSearch}, ${chatMessage}`);
+  async loadReferenceAgain( messageId: string, textToSearch: string, chatMessage: string, referenceId: string,): Promise<string> {
+    console.log(`Inside loadReferenceAgain Service: ${messageId}, ${textToSearch}, ${chatMessage}`);
 
     const response = await api.post<string>(`/api/chat/load-reference-again/${messageId}`, {
       textToSearch,
@@ -247,10 +247,10 @@ export const chatService = {
     return response.data.path;
   },
 
-  async getExtractedContentByRawRefId(rawRefId: string, sessionId: string): Promise<{ fileId: string; text: string; fileName: string }> {
+  async getExtractedContentByRawRefId(rawRefId: string, sessionId: string): Promise<{ id: string; fileId: string; text: string; fileName: string }> {
     console.log('Inside getExtractedContentByRawRefId Service');
     
-    const response = await api.get<{ fileId: string; text: string; fileName: string }>(`/api/chat/extracted-content/${rawRefId}`, { params: { sessionId } });
+    const response = await api.get<{ id: string; fileId: string; text: string; fileName: string }>(`/api/chat/extracted-content/${rawRefId}`, { params: { sessionId } });
     return response.data;
   },
 };
