@@ -28,7 +28,7 @@ function SubscriptionPageContent() {
     error
   } = useSubscriptionStore();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isProcessingUpgrade, setIsProcessingUpgrade] = useState(false);
+
   const [isProcessingDowngrade, setIsProcessingDowngrade] = useState(false);
 
   const [showCancelDowngradeModal, setShowCancelDowngradeModal] = useState(false);
@@ -44,8 +44,7 @@ function SubscriptionPageContent() {
   } | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
-  const [isLoadingPlans, setIsLoadingPlans] = useState(true);
-  const [plansError, setPlansError] = useState<string | null>(null);
+
   const [currentTargetPlan, setCurrentTargetPlan] = useState<string | undefined>(undefined);
 
   const router = useRouter();
@@ -70,15 +69,10 @@ function SubscriptionPageContent() {
   // Function to fetch subscription plans
   const fetchSubscriptionPlans = useCallback(async () => {
     try {
-      setIsLoadingPlans(true);
-      setPlansError(null);
       const plans = await paymentService.getAllSubscriptionPlans();
       setSubscriptionPlans(plans);
     } catch (error) {
       console.error('Error fetching subscription plans:', error);
-      setPlansError('Failed to load subscription plans');
-    } finally {
-      setIsLoadingPlans(false);
     }
   }, []);
 
@@ -104,16 +98,7 @@ function SubscriptionPageContent() {
     return priceInUSD.toFixed(2);
   }, [getPlanByName]);
 
-  const getPlanAnnualPrice = useCallback((planName: string) => {
-    const plan = getPlanByName(planName);
-    if (!plan) return '0';
-    // Convert from cents to USD and calculate annual price with discount
-    const monthlyPriceInUSD = plan.price / 100;
-    // Plus plan gets 60% discount, others get 50% discount
-    const discountRate = planName.toLowerCase() === 'plus' ? 0.4 : 0.5; // 60% off = 0.4 remaining, 50% off = 0.5 remaining
-    const annualPrice = monthlyPriceInUSD * 12 * discountRate;
-    return annualPrice.toFixed(2);
-  }, [getPlanByName]);
+
 
   const getPaddlePriceId = useCallback((planName: string, isAnnual: boolean) => {
     const plan = getPlanByName(planName);
@@ -795,7 +780,7 @@ function SubscriptionPageContent() {
             <p className="text-secondary text-center mb-4 leading-relaxed">
               {isScheduledCancel 
                 ? `You currently have a canceled subscription. Downgrading will reactivate your subscription with the ${targetPlanName} plan.`
-                : `You're about to downgrade from ${currentPlanName} to ${targetPlanName} plan.`
+                : `You&apos;re about to downgrade from ${currentPlanName} to ${targetPlanName} plan.`
               }
             </p>
 
@@ -1098,10 +1083,10 @@ function SubscriptionPageContent() {
                     </div>
                     <button
                        onClick={() => openCheckout(SubscribeTypes.UPGRADE, 'plus')}
-                       disabled={isProcessingUpgrade}
+                       disabled={isProcessingDowngrade}
                        className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                      >
-                       {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Plus'}
+                       {isProcessingDowngrade ? 'Processing...' : 'Upgrade to Plus'}
                      </button>
                   </div>
                   {!dbSubscription.hasDowngraded && (
@@ -1134,10 +1119,10 @@ function SubscriptionPageContent() {
                     </div>
                     <button
                       onClick={() => openCheckout(SubscribeTypes.UPGRADE, 'pro')}
-                      disabled={isProcessingUpgrade}
+                      disabled={isProcessingDowngrade}
                       className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                     >
-                      {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Pro'}
+                      {isProcessingDowngrade ? 'Processing...' : 'Upgrade to Pro'}
                     </button>
                   </div>
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
@@ -1149,10 +1134,10 @@ function SubscriptionPageContent() {
                     </div>
                     <button
                       onClick={() => openCheckout(SubscribeTypes.UPGRADE, 'plus')}
-                      disabled={isProcessingUpgrade}
+                      disabled={isProcessingDowngrade}
                       className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
                     >
-                      {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Plus'}
+                      {isProcessingDowngrade ? 'Processing...' : 'Upgrade to Plus'}
                     </button>
                   </div>
                 </>
@@ -1285,7 +1270,7 @@ function SubscriptionPageContent() {
                         Upgrade takes effect immediately
                       </p>
                       <p className="text-xs text-secondary mt-1">
-                        You'll be charged the full amount and receive both new plan features and remaining features from your previous plan's billing cycle
+                        You&apos;ll be charged the full amount and receive both new plan features and remaining features from your previous plan&apos;s billing cycle
                       </p>
                     </div>
                   )}
@@ -1304,7 +1289,7 @@ function SubscriptionPageContent() {
                 
                 {/* Features Summary */}
                 <div className="border-t border-secondary pt-4">
-                  <h5 className="text-sm font-medium text-text-primary mb-2">What's included:</h5>
+                  <h5 className="text-sm font-medium text-text-primary mb-2">What&apos;s included:</h5>
                   <ul className="text-sm text-secondary space-y-1">
                     <li>• Unlimited PDF page uploads</li>
                     <li>• {selectedPlan.name === 'Plus' || selectedPlan.name === 'plus' ? 'Unlimited' : getPlanByName(selectedPlan.name?.toLowerCase() || '')?.messagesLimit || 'N/A'} AI chat messages</li>

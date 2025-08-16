@@ -121,32 +121,7 @@ export default function PricingPage() {
     router.push('/app'); // Redirect anyway - app will handle the subscription check
   }, [router, setIsProcessingPayment]);
 
-  const monthlyStarter: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtb4tanwae3pv22fyewn0g',
-    quantity: 1,
-  }]
-  const monthlyStarterWithTrial: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtvh1gm7s98g4mxg2syfbj',
-    quantity: 1,
-  }]
-  // Removed unused yearlyStarterWithTrial
-  const yearlyStarter: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtd41z144brf89mj9nf69f',
-    quantity: 1,
-  }]
-  const monthlyPro: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtps3cxzxfasnm66p9zv17',
-    quantity: 1,
-  }]
-  const yearlyPro: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtqfqrzfx707b60n9gepax',
-    quantity: 1,
-  }]
-  const monthlyProWithTrial: Paddle.CheckoutLineItem[] = [{
-    priceId: 'pri_01jzvtxhb6bepcqhme0ynrg4wm',
-    quantity: 1,
-  }]
-  // Removed unused yearlyProWithTrial
+  // Removed unused Paddle checkout line items
 
   const openCheckout = async (items: Paddle.CheckoutOpenLineItem[], planInfo: {
     name: string;
@@ -211,7 +186,7 @@ export default function PricingPage() {
     };
 
     checkAuth();
-  }, [setUser, router]);
+  }, [setUser, router, isFromPaymentFlow]);
 
   // Fetch subscription plans on component mount
   useEffect(() => {

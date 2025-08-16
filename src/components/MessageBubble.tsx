@@ -526,7 +526,7 @@ export default function MessageBubble({
         setTextToNumber({ ...numMap });
       }
     }
-  }, [referenceRawIds, refIdToText, currentSessionId, getRefNumCache, getNextCounter, setRefNumCache, setNextCounter]);
+  }, [referenceRawIds, refIdToText, textToNumber, currentSessionId, getRefNumCache, getNextCounter, setRefNumCache, setNextCounter]);
 
   // Load file paths for references when new reference IDs are found (we still support showing file path if needed)
   useEffect(() => {
@@ -567,7 +567,7 @@ export default function MessageBubble({
       })();
     }, 300);
     return () => clearTimeout(timer);
-  }, [referenceRawIds, currentSessionId]);
+  }, [referenceRawIds, currentSessionId, filePaths, loadingPaths, refIdToFileId]);
   
   const handleShowFileWrapper = async (rawRefId: string) => {
     if (!rawRefId) {
