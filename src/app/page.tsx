@@ -65,7 +65,7 @@ export default function Home() {
         <h1 className="flex justify-center items-center text-5xl font-bold text-text-primary mb-8"
         style={{ height: 100, overflowY: 'hidden' }}>
           <span>Welcome to</span> 
-          <Image src="/refdoc-ai-logo.png" width={300} height={300} alt='RefDoc AI Logo'></Image>
+          <Image src="/pdfizz-ai-official-logo.png" width={300} height={300} alt='PDFizz AI Logo'></Image>
         </h1>
         
         <p className="text-xl text-secondary mb-12 max-w-2xl mx-auto">

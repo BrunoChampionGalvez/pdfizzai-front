@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/auth';
 import { useSubscriptionStore } from '../../store/subscription';
 import { authService } from '../../services/auth';
 import { subscriptionService } from '../../services/subscription';
+import { paymentService, SubscriptionPlan } from '../../services/payment';
 import { setRedirectPath } from '../../lib/auth-utils';
 import { PlanName } from '../../types/subscription';
 
@@ -17,13 +18,71 @@ export default function PricingPage() {
   const { dbSubscription, isSubscriptionActive } = useSubscriptionStore();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isFromPaymentFlow, setIsFromPaymentFlow] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<{
     name: string;
     price: string;
     interval: string;
     isTrial: boolean;
   } | null>(null);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(true);
+  const [plansError, setPlansError] = useState<string | null>(null);
   const router = useRouter();
+
+  // Function to fetch subscription plans
+  const fetchSubscriptionPlans = useCallback(async () => {
+    try {
+      setIsLoadingPlans(true);
+      setPlansError(null);
+      const plans = await paymentService.getAllSubscriptionPlans();
+      setSubscriptionPlans(plans);
+    } catch (error) {
+      console.error('Error fetching subscription plans:', error);
+      setPlansError('Failed to load subscription plans');
+    } finally {
+      setIsLoadingPlans(false);
+    }
+  }, []);
+
+  // Helper functions to get plan data
+  const getPlanByName = useCallback((name: string) => {
+    return subscriptionPlans.find(plan => plan.name.toLowerCase() === name.toLowerCase());
+  }, [subscriptionPlans]);
+
+  const getPlanPrice = useCallback((planName: string, isAnnual: boolean) => {
+    const plan = getPlanByName(planName);
+    if (!plan) return '0';
+    
+    // Convert from cents to USD
+    const priceInUSD = plan.price / 100;
+    
+    if (isAnnual) {
+      // For annual billing, apply discount and calculate monthly equivalent
+      // Plus plan gets 60% discount, others get 50% discount
+      const discountRate = planName.toLowerCase() === 'plus' ? 0.4 : 0.5; // 60% off = 0.4 remaining, 50% off = 0.5 remaining
+      const annualPrice = priceInUSD * 12 * discountRate;
+      return (annualPrice / 12).toFixed(2);
+    }
+    return priceInUSD.toFixed(2);
+  }, [getPlanByName]);
+
+  const getPlanAnnualPrice = useCallback((planName: string) => {
+    const plan = getPlanByName(planName);
+    if (!plan) return '0';
+    // Convert from cents to USD and calculate annual price with discount
+    const monthlyPriceInUSD = plan.price / 100;
+    // Plus plan gets 60% discount, others get 50% discount
+    const discountRate = planName.toLowerCase() === 'plus' ? 0.4 : 0.5; // 60% off = 0.4 remaining, 50% off = 0.5 remaining
+    const annualPrice = monthlyPriceInUSD * 12 * discountRate;
+    return annualPrice.toFixed(2);
+  }, [getPlanByName]);
+
+  const getPaddlePriceId = useCallback((planName: string, isAnnual: boolean) => {
+    const plan = getPlanByName(planName);
+    if (!plan) return '';
+    return isAnnual ? plan.yearlyPaddlePriceId : plan.monthlyPaddlePriceId;
+  }, [getPlanByName]);
 
   // Function to poll for subscription activation after payment
   const pollForSubscriptionActivation = useCallback(async (userId: string) => {
@@ -133,9 +192,9 @@ export default function PricingPage() {
           try {
             await subscriptionService.loadUserSubscriptionData(currentUser.id);
             
-            // If user already has active subscription, redirect to app
-            if (subscriptionService.hasAppAccess()) {
-              console.log('User has active subscription, redirecting to app');
+            // Only redirect to app if user came from payment flow and has active subscription
+            if (subscriptionService.hasAppAccess() && isFromPaymentFlow) {
+              console.log('User has active subscription after payment, redirecting to app');
               router.push('/app');
               return;
             }
@@ -154,6 +213,11 @@ export default function PricingPage() {
     checkAuth();
   }, [setUser, router]);
 
+  // Fetch subscription plans on component mount
+  useEffect(() => {
+    fetchSubscriptionPlans();
+  }, [fetchSubscriptionPlans]);
+
   useEffect(() => {
     const initializePaddleFunction = async () => {
       // Only initialize Paddle if user is authenticated
@@ -167,6 +231,7 @@ export default function PricingPage() {
           if (event.name === 'checkout.completed') {
             console.log('Payment completed, starting subscription verification...');
             setIsProcessingPayment(true);
+            setIsFromPaymentFlow(true);
             
             // Start polling for subscription activation instead of immediate redirect
             if (user?.id) {
@@ -210,6 +275,7 @@ export default function PricingPage() {
               if (event.name === 'checkout.completed') {
                 console.log('Payment completed, starting subscription verification...');
                 setIsProcessingPayment(true);
+                setIsFromPaymentFlow(true);
                 
                 // Start polling for subscription activation instead of immediate redirect
                 if (user?.id) {
@@ -296,13 +362,33 @@ export default function PricingPage() {
             </span>
             {isAnnual && (
               <span className="ml-2 bg-accent text-primary px-2 py-1 rounded-full text-xs font-semibold absolute -right-16">
-                16% off
+                50% off
               </span>
             )}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+        {/* Loading State */}
+        {isLoadingPlans ? (
+          <div className="flex justify-center items-center py-16">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
+            <span className="ml-4 text-text-primary">Loading pricing plans...</span>
+          </div>
+        ) : plansError ? (
+          <div className="text-center py-16">
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 max-w-md mx-auto">
+              <strong className="font-bold">Error loading plans: </strong>
+              <span className="block sm:inline">{plansError}</span>
+            </div>
+            <button 
+              onClick={fetchSubscriptionPlans}
+              className="bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded transition-colors duration-200"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
           {/* Starter Plan */}
           <div className="bg-background-secondary rounded-2xl p-8 border border-secondary relative">
             <div className="text-center flex flex-col justify-between h-full">
@@ -310,19 +396,19 @@ export default function PricingPage() {
                 <h3 className="text-2xl font-semibold text-text-primary mb-4">Starter</h3>
                 <div className="mb-6">
                   <span className="text-4xl font-bold text-accent">
-                    ${isAnnual ? '4.90' : '5.90'}
+                    ${getPlanPrice('starter', isAnnual)}
                   </span>
                   <span className="text-secondary">/{isAnnual ? 'month' : 'month'}</span>
                   {isAnnual && (
                     <div className="text-sm text-secondary mt-1">
-                      Billed annually ($59.80/year)
+                      Billed annually (${getPlanAnnualPrice('starter')}/year)
                     </div>
                   )}
                   <div className="text-sm text-accent mt-2 font-medium">
                     Try free for 7 days
                   </div>
                   <div className="text-xs text-accent mt-1 font-medium">
-                    with 10 PDFs, 20 AI messages
+                    with {getPlanByName('starter')?.trialFilePagesLimit || 10} PDFs, {getPlanByName('starter')?.trialMessagesLimit || 20} AI messages
                   </div>
                 </div>
                 <ul className="text-left space-y-3 mb-8">
@@ -330,13 +416,13 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    2000 PDF pages uploads
+                    Unlimited PDF page uploads
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    200 AI chat messages
+                    {getPlanByName('starter')?.messagesLimit || 200} AI chat messages
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -362,10 +448,10 @@ export default function PricingPage() {
                     <button 
                       className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
                       onClick={() => openCheckout(
-                        monthlyStarterWithTrial, 
+                        [{ priceId: getPaddlePriceId('starter', false), quantity: 1 }], 
                         {
                           name: 'Starter',
-                          price: '5.90',
+                          price: getPlanPrice('starter', false),
                           interval: 'monthly',
                           isTrial: true
                         }
@@ -375,9 +461,9 @@ export default function PricingPage() {
                     </button>
                     <button 
                       className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
-                      onClick={() => openCheckout(isAnnual ? yearlyStarter : monthlyStarter, {
+                      onClick={() => openCheckout([{ priceId: getPaddlePriceId('starter', isAnnual), quantity: 1 }], {
                         name: 'Starter',
-                        price: isAnnual ? '59.80' : '5.90',
+                        price: isAnnual ? getPlanAnnualPrice('starter') : getPlanPrice('starter', false),
                         interval: isAnnual ? 'annually' : 'monthly',
                         isTrial: false
                       })}
@@ -414,19 +500,19 @@ export default function PricingPage() {
                 <h3 className="text-2xl font-semibold text-text-primary mb-4">Pro</h3>
                 <div className="mb-6">
                   <span className="text-4xl font-bold text-accent">
-                    ${isAnnual ? '8.25' : '9.90'}
+                    ${getPlanPrice('pro', isAnnual)}
                   </span>
                   <span className="text-secondary">/{isAnnual ? 'month' : 'month'}</span>
                   {isAnnual && (
                     <div className="text-sm text-secondary mt-1">
-                      Billed annually ($99/year)
+                      Billed annually (${getPlanAnnualPrice('pro')}/year)
                     </div>
                   )}
                   <div className="text-sm text-accent mt-2 font-medium">
                     Try free for 7 days
                   </div>
                   <div className="text-xs text-accent mt-1 font-semibold">
-                    with 20 PDFs, 40 AI messages
+                    with {getPlanByName('pro')?.trialFilePagesLimit || 20} PDFs, {getPlanByName('pro')?.trialMessagesLimit || 40} AI messages
                   </div>
                 </div>
                 <ul className="text-left space-y-3 mb-8">
@@ -434,13 +520,13 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    5000 PDF pages uploads
+                    Unlimited PDF page uploads
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    400 AI chat messages
+                    {getPlanByName('pro')?.messagesLimit || 400} AI chat messages
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -466,10 +552,10 @@ export default function PricingPage() {
                     <button 
                       className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
                       onClick={() => openCheckout(
-                        monthlyProWithTrial, 
+                        [{ priceId: getPaddlePriceId('pro', false), quantity: 1 }], 
                         {
                           name: 'Pro',
-                          price: '9.90',
+                          price: getPlanPrice('pro', false),
                           interval: 'monthly',
                           isTrial: true
                         }
@@ -479,9 +565,9 @@ export default function PricingPage() {
                     </button>
                     <button
                       className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
-                      onClick={() => openCheckout(isAnnual ? yearlyPro : monthlyPro, {
+                      onClick={() => openCheckout([{ priceId: getPaddlePriceId('pro', isAnnual), quantity: 1 }], {
                         name: 'Pro',
-                        price: isAnnual ? '99' : '9.90',
+                        price: isAnnual ? getPlanAnnualPrice('pro') : getPlanPrice('pro', false),
                         interval: isAnnual ? 'annually' : 'monthly',
                         isTrial: false
                       })}
@@ -506,19 +592,29 @@ export default function PricingPage() {
             </div>
           </div>
 
-          {/* Enterprise Plan */}
-          <div className="bg-background-secondary rounded-2xl p-8 border border-secondary">
+          {/* Plus Plan */}
+          <div className="bg-background-secondary rounded-2xl p-8 border border-secondary relative">
+            {/* 60% Discount Badge - Only show when annual billing is selected */}
+            {isAnnual && (
+              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                <span className="bg-accent text-primary px-4 py-1 rounded-full text-sm font-bold">
+                  Special 60% OFF
+                </span>
+              </div>
+            )}
             <div className="text-center flex flex-col justify-between h-full">
               <div>
-                <h3 className="text-2xl font-semibold text-text-primary mb-4">Enterprise</h3>
+                <h3 className="text-2xl font-semibold text-text-primary mb-4">Plus</h3>
                 <div className="mb-6">
-                  <span className="text-4xl font-bold text-accent">
-                    ${isAnnual ? '7.00' : '8.49'}
-                  </span>
-                  <span className="text-secondary">/{isAnnual ? 'month' : 'month'}/user</span>
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <span className="text-4xl font-bold text-accent">
+                      ${getPlanPrice('plus', isAnnual) || (isAnnual ? '8.00' : '9.99')}
+                    </span>
+                  </div>
+                  <span className="text-secondary">/{isAnnual ? 'month' : 'month'}</span>
                   {isAnnual && (
                     <div className="text-sm text-secondary mt-1">
-                      Billed annually ($84/year/user)
+                      Billed annually (${getPlanAnnualPrice('plus') || '96'}/year)
                     </div>
                   )}
                 </div>
@@ -527,13 +623,13 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    5000 PDF pages uploads / user
+                    Unlimited PDF page uploads
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    400 AI chat messages / user
+                    Unlimited AI chat messages
                   </li>
                   <li className="flex items-center text-text-primary">
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -545,16 +641,67 @@ export default function PricingPage() {
                     <svg className="h-5 w-5 text-accent mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    Negotiable pricing based on volume
+                    Advanced analytics
                   </li>
                 </ul>
               </div>
-              <button className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer">
-                Contact Sales
-              </button>
+              <div className="space-y-3">
+                {/* Show subscription status if user has active subscription */}
+                {isAuthenticated && isSubscriptionActive() ? (
+                  <div className="text-center">
+                    <div className="w-full bg-green-100 text-green-800 border border-green-300 font-semibold py-3 px-6 rounded-lg">
+                      ✓ Already Subscribed
+                    </div>
+                    <p className="text-sm text-secondary mt-2">
+                      {dbSubscription?.status === 'trialing' ? 'You are currently on a trial' : 'You have an active subscription'}
+                    </p>
+                  </div>
+                ) : isAuthenticated ? (
+                  <>
+                    <button 
+                      className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
+                      onClick={() => openCheckout(
+                        [{ priceId: getPaddlePriceId('plus', false), quantity: 1 }], 
+                        {
+                          name: 'Plus',
+                          price: getPlanPrice('plus', false),
+                          interval: 'monthly',
+                          isTrial: true
+                        }
+                      )}
+                    >
+                      Start Free Trial
+                    </button>
+                    <button
+                      className="w-full bg-secondary hover:bg-secondary-200 text-text-primary font-semibold py-2 px-6 rounded-lg transition-colors duration-200 text-sm cursor-pointer"
+                      onClick={() => openCheckout([{ priceId: getPaddlePriceId('plus', isAnnual), quantity: 1 }], {
+                        name: 'Plus',
+                        price: isAnnual ? getPlanAnnualPrice('plus') : getPlanPrice('plus', false),
+                        interval: isAnnual ? 'annually' : 'monthly',
+                        isTrial: false
+                      })}
+                    >
+                      Subscribe Now
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="w-full bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-6 rounded-lg transition-colors duration-200 cursor-pointer"
+                    onClick={() => router.push('/auth/signup?redirect=/pricing')}
+                  >
+                    Sign Up for Free Trial
+                  </button>
+                )}
+                {!isAuthenticated || !isSubscriptionActive() ? (
+                  <p className="text-xs text-secondary mt-2">
+                    Cancel anytime during trial
+                  </p>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </div>
       {/* Only render checkout container if user is authenticated */}
       {isAuthenticated && selectedPlan && (
@@ -627,19 +774,9 @@ export default function PricingPage() {
                 <div className="border-t border-secondary pt-4">
                   <h5 className="text-sm font-medium text-text-primary mb-2">What&apos;s included:</h5>
                   <ul className="text-sm text-secondary space-y-1">
-                    {selectedPlan.name === 'Starter' ? (
-                      <>
-                        <li>• 2000 PDF pages uploads</li>
-                        <li>• 200 AI chat messages</li>
-                        <li>• Email support</li>
-                      </>
-                    ) : (
-                      <>
-                        <li>• 5000 PDF pages uploads</li>
-                        <li>• 400 AI chat messages</li>
-                        <li>• Priority support</li>
-                      </>
-                    )}
+                    <li>• Unlimited PDF page uploads</li>
+                    <li>• {selectedPlan.name === 'Plus' ? 'Unlimited' : (getPlanByName(selectedPlan.name.toLowerCase())?.messagesLimit || 0)} AI chat messages</li>
+                    <li>• {selectedPlan.name === 'Starter' ? 'Email support' : 'Priority support'}</li>
                   </ul>
                 </div>
                 {/* Trial Limits */}
@@ -647,7 +784,9 @@ export default function PricingPage() {
                   <div className='bg-accent bg-opacity-10 rounded-lg p-3 mt-3'>
                     <p className="text-sm text-primary mt-1 font-medium">Trial limits:</p>
                     <p className="text-xs text-primary mt-1 font-medium">
-                      <span className='font-normal'>{selectedPlan.name === 'Starter' ? '10 PDFs, 20 messages' : '20 PDFs, 40 messages'}</span>
+                      <span className='font-normal'>
+                        Unlimited PDF page uploads, {getPlanByName(selectedPlan.name.toLowerCase())?.trialMessagesLimit || 0} AI chat messages
+                      </span>
                     </p>
                   </div>
                 }

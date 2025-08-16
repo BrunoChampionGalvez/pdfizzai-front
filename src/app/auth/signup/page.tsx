@@ -62,7 +62,7 @@ export default function SignupPage() {
     <div className="h-screen bg-primary flex items-center justify-center">
       <div className="bg-background-secondary p-8 rounded-2xl shadow-lg w-full max-w-md">
         <h2 className="text-3xl font-bold mb-6 text-text-primary text-center">
-          Create an Account on <span className="text-accent">RefDoc AI</span>
+          Create an Account on <span className="text-accent">PDFizz AI</span>
         </h2>
         
         {error && (

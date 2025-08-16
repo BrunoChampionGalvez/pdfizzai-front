@@ -109,7 +109,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full mx-auto p-6">
         <div className="bg-background-secondary rounded-2xl p-8 shadow-sm">
           <h1 className="text-3xl font-bold text-text-primary text-center mb-8">
-            Sign In to <span className="text-accent">RefDoc AI</span>
+            Sign In to <span className="text-accent">PDFizz AI</span>
           </h1>
 
           {error && (

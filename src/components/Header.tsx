@@ -77,7 +77,7 @@ export default function Header() {
   return (
     <header className="bg-background-header p-4 flex justify-between items-center shadow-sm z-10">
       <div className="flex items-center" style={{ height: 50, overflowY: 'hidden' }}>
-        <Image src="/refdoc-ai-logo.png" alt="RefDoc AI Logo" width={150} height={150} />
+        <Image src="/pdfizz-ai-official-logo.png" alt="PDFizz AI Logo" width={150} height={150} />
         
         <div className="flex items-center space-x-4">
           <button

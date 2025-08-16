@@ -69,8 +69,8 @@ export default function Navbar() {
           <div className="flex items-center">
             <Link href="/" className="flex items-center">
               <Image 
-                src="/refdoc-ai-logo.png" 
-                alt="RefDoc AI Logo" 
+                src="/pdfizz-ai-official-logo.png" 
+                alt="PDFizz AI Logo" 
                 width={150} 
                 height={150}
               />

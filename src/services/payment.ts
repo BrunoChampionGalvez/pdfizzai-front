@@ -26,6 +26,9 @@ export interface DbSubscription {
     interval: string;
     frequency: number;
     plan?: SubscriptionPlan;
+    planBeforeDowngrade?: SubscriptionPlan;
+    priceBeforeDowngrade?: number;
+    nameBeforeDowngrade?: string;
     createdAt: Date;
 }
 
@@ -49,6 +52,10 @@ export interface SubscriptionPlan {
     frequency: number; // e.g., 1 for monthly, 12 for yearly
     trialMessagesLimit: number;
     trialFilePagesLimit: number;
+    yearlyPaddlePriceId: string;
+    monthlyPaddlePriceId: string;
+    yearlyPaddlePriceIdWithTrial: string;
+    monthlyPaddlePriceIdWithTrial: string;
     currency: string;
     createdAt: Date;
 }
@@ -136,6 +143,17 @@ export const paymentService = {
         }
     },
 
+    async getAllSubscriptionPlans(): Promise<SubscriptionPlan[]> {
+        try {
+            const response = await api.get('/api/payment/subscription-plans');
+            return response.data;
+        }
+        catch (error) {
+            console.error('PaymentService: Error fetching all subscription plans', error);
+            throw error;
+        }
+    },
+
     async cancelSubscription(subscriptionId: string): Promise<boolean> {
         try {
             const response = await api.put(`/api/payment/cancel-subscription/${subscriptionId}`);
@@ -158,9 +176,11 @@ export const paymentService = {
         }
     },
 
-    async upgradeSubscription(subscriptionId: string | undefined): Promise<boolean> {
+    async upgradeSubscription(subscriptionId: string | undefined, targetPlan?: string): Promise<boolean> {
         try {
-            const response = await api.patch(`/api/payment/upgrade-subscription/${subscriptionId}`);
+            const response = await api.patch(`/api/payment/upgrade-subscription/${subscriptionId}`, {
+                targetPlan
+            });
             return response.data;
         }
         catch (error) {
@@ -169,9 +189,11 @@ export const paymentService = {
         }
     },
 
-    async downgradeSubscription(subscriptionId: string | undefined): Promise<boolean> {
+    async downgradeSubscription(subscriptionId: string | undefined, targetPlan?: string): Promise<boolean> {
         try {
-            const response = await api.patch(`/api/payment/downgrade-subscription/${subscriptionId}`);
+            const response = await api.patch(`/api/payment/downgrade-subscription/${subscriptionId}`, {
+                targetPlan
+            });
             return response.data;
         }
         catch (error) {

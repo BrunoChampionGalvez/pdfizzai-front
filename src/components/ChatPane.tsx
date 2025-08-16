@@ -774,7 +774,7 @@ export default function ChatPane() {
                   className={`bg-accent hover:bg-accent-300 text-primary font-semibold py-4 px-6 rounded-r-lg transition-colors text-lg h-16
                     ${isLoading || !message.trim() || hasExceededMessageLimit() ? 'opacity-50 cursor-not-allowed' : ' cursor-pointer'}`}
                 >
-                  {isLoading ? <LoadingIcon /> : 'Ask RefDoc AI'}
+                  {isLoading ? <LoadingIcon /> : 'Ask PDFizz AI'}
                 </button>
               </div>
             </form>

@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/auth';
 import { useSubscriptionStore } from '../../store/subscription';
 import { subscriptionService } from '../../services/subscription';
-import { AuthToken, paymentService } from '../../services/payment';
+import { AuthToken, paymentService, SubscriptionPlan } from '../../services/payment';
 import { useToast } from '../../components/ToastProvider';
 import UsageBar from '../../components/UsageBar';
 import * as Paddle from '@paddle/paddle-js';
@@ -33,7 +33,7 @@ function SubscriptionPageContent() {
 
   const [showCancelDowngradeModal, setShowCancelDowngradeModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
   const [showDowngradeModal, setShowDowngradeModal] = useState(false);
   const [showReactivateModal, setShowReactivateModal] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState<{
@@ -43,8 +43,83 @@ function SubscriptionPageContent() {
     subscribeType: SubscribeTypes | undefined;
   } | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(true);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  const [currentTargetPlan, setCurrentTargetPlan] = useState<string | undefined>(undefined);
 
   const router = useRouter();
+
+  // Helper function to get the current display plan name
+  const getCurrentDisplayPlan = useCallback(() => {
+    if (!dbSubscription?.plan) return 'starter';
+    
+    // If user has downgraded, show the original plan they had before downgrade
+    if (dbSubscription.hasDowngraded && dbSubscription.nameBeforeDowngrade) {
+      return dbSubscription.nameBeforeDowngrade;
+    }
+    
+    // If user has upgraded, show the upgraded plan
+    if (dbSubscription.hasUpgraded) {
+      return dbSubscription.plan.name;
+    }
+    
+    return dbSubscription.plan.name;
+  }, [dbSubscription]);
+
+  // Function to fetch subscription plans
+  const fetchSubscriptionPlans = useCallback(async () => {
+    try {
+      setIsLoadingPlans(true);
+      setPlansError(null);
+      const plans = await paymentService.getAllSubscriptionPlans();
+      setSubscriptionPlans(plans);
+    } catch (error) {
+      console.error('Error fetching subscription plans:', error);
+      setPlansError('Failed to load subscription plans');
+    } finally {
+      setIsLoadingPlans(false);
+    }
+  }, []);
+
+  // Helper function to get plan data
+  const getPlanByName = useCallback((name: string) => {
+    return subscriptionPlans.find(plan => plan.name.toLowerCase() === name.toLowerCase());
+  }, [subscriptionPlans]);
+
+  const getPlanPrice = useCallback((planName: string, isAnnual: boolean) => {
+    const plan = getPlanByName(planName);
+    if (!plan) return '0';
+    
+    // Convert from cents to USD
+    const priceInUSD = plan.price / 100;
+    
+    if (isAnnual) {
+      // For annual billing, apply discount and calculate monthly equivalent
+      // Plus plan gets 60% discount, others get 50% discount
+      const discountRate = planName.toLowerCase() === 'plus' ? 0.4 : 0.5; // 60% off = 0.4 remaining, 50% off = 0.5 remaining
+      const annualPrice = priceInUSD * 12 * discountRate;
+      return (annualPrice / 12).toFixed(2);
+    }
+    return priceInUSD.toFixed(2);
+  }, [getPlanByName]);
+
+  const getPlanAnnualPrice = useCallback((planName: string) => {
+    const plan = getPlanByName(planName);
+    if (!plan) return '0';
+    // Convert from cents to USD and calculate annual price with discount
+    const monthlyPriceInUSD = plan.price / 100;
+    // Plus plan gets 60% discount, others get 50% discount
+    const discountRate = planName.toLowerCase() === 'plus' ? 0.4 : 0.5; // 60% off = 0.4 remaining, 50% off = 0.5 remaining
+    const annualPrice = monthlyPriceInUSD * 12 * discountRate;
+    return annualPrice.toFixed(2);
+  }, [getPlanByName]);
+
+  const getPaddlePriceId = useCallback((planName: string, isAnnual: boolean) => {
+    const plan = getPlanByName(planName);
+    if (!plan) return '';
+    return isAnnual ? plan.yearlyPaddlePriceId : plan.monthlyPaddlePriceId;
+  }, [getPlanByName]);
 
   // Function to poll for subscription activation after payment
   const pollForSubscriptionActivation = async (userId: string) => {
@@ -76,40 +151,81 @@ function SubscriptionPageContent() {
 
 
 
-  const openCheckout = async (subscribeType: SubscribeTypes) => {
+  const openCheckout = async (subscribeType: SubscribeTypes, targetPlan?: string) => {
+    // Store the target plan for use in modal confirmations
+    setCurrentTargetPlan(targetPlan);
+    
     // Check if subscription is scheduled for cancellation OR active and show appropriate modal
     if (dbSubscription?.status !== SubscriptionStatus.CANCELED) {
+      // Create plan info for modal display
+      let planInfo = null;
+      
       if (subscribeType === SubscribeTypes.UPGRADE) {
-        setShowUpgradeModal(true);
+        const finalTargetPlan = targetPlan || 'pro';
+        const targetPlanName = finalTargetPlan.charAt(0).toUpperCase() + finalTargetPlan.slice(1);
+        const targetPlanData = getPlanByName(finalTargetPlan);
+        const targetPrice = targetPlanData ? (targetPlanData.price / 100).toFixed(2) : '0.00';
+        
+        planInfo = {
+          name: targetPlanName,
+          price: targetPrice,
+          interval: dbSubscription?.interval || 'month',
+          subscribeType: subscribeType,
+        };
+        
+        setSelectedPlan(planInfo);
+        // Directly execute checkout for upgrades
+      await executeCheckout(subscribeType, targetPlan);
         return;
       } else if (subscribeType === SubscribeTypes.DOWNGRADE) {
+        const finalTargetPlan = targetPlan || 'starter';
+        const targetPlanName = finalTargetPlan.charAt(0).toUpperCase() + finalTargetPlan.slice(1);
+        const targetPrice = getPlanPrice(finalTargetPlan, dbSubscription?.interval === 'year');
+        
+        planInfo = {
+          name: targetPlanName,
+          price: targetPrice,
+          interval: dbSubscription?.interval || 'month',
+          subscribeType: subscribeType,
+        };
+        
+        setSelectedPlan(planInfo);
         setShowDowngradeModal(true);
         return;
       } else if (subscribeType === SubscribeTypes.REACTIVATE) {
+        const currentPlanName = dbSubscription?.plan?.name || 'starter';
+        const reactivatePlanName = currentPlanName.charAt(0).toUpperCase() + currentPlanName.slice(1);
+        
+        planInfo = {
+          name: reactivatePlanName,
+          price: Number(dbSubscription?.plan?.price).toFixed(2) || '0.00',
+          interval: dbSubscription?.interval || 'month',
+          subscribeType: subscribeType,
+        };
+        
+        setSelectedPlan(planInfo);
         setShowReactivateModal(true);
         return;
       }
     }
 
     // Execute the actual checkout logic
-    await executeCheckout(subscribeType);
+    await executeCheckout(subscribeType, targetPlan);
   };
 
-  const executeCheckout = async (subscribeType: SubscribeTypes) => {
+  const executeCheckout = async (subscribeType: SubscribeTypes, targetPlan?: string) => {
     let items: Paddle.CheckoutOpenLineItem[] = [];
     if (subscribeType === SubscribeTypes.REACTIVATE) {
       if (!dbSubscription?.scheduledCancel) {
         items = [
           {
-            priceId: dbSubscription?.plan?.name === 'starter' ? (dbSubscription.interval === 'month' ? 'pri_01jzvtb4tanwae3pv22fyewn0g' : 'pri_01jzvtd41z144brf89mj9nf69f') :
-              dbSubscription?.plan?.name === 'pro' ? (dbSubscription.interval === 'month' ? 'pri_01jzvtps3cxzxfasnm66p9zv17' : 'pri_01jzvtqfqrzfx707b60n9gepax') :
-              'pri_01jzvtb4tanwae3pv22fyewn0g', // Default to Starter monthly if no plan
+            priceId: getPaddlePriceId(dbSubscription?.plan?.name || 'starter', dbSubscription?.interval === 'year') || 'pri_01jzvtb4tanwae3pv22fyewn0g',
             quantity: 1,
           }
         ];
   
         const planInfo = {
-          name: dbSubscription?.plan && (dbSubscription?.plan?.name === 'starter' ? 'Starter' : dbSubscription?.plan.name === 'pro' ? 'Pro' : 'Enterprise'),
+          name: dbSubscription?.plan && (dbSubscription?.plan?.name === 'starter' ? 'Starter' : dbSubscription?.plan.name === 'pro' ? 'Pro' : dbSubscription?.plan.name === 'plus' ? 'Plus' : 'Enterprise'),
           price: Number(dbSubscription?.plan?.price).toFixed(2) || '0.00',
           interval: dbSubscription?.interval || 'month',
           subscribeType: subscribeType,
@@ -148,69 +264,85 @@ function SubscriptionPageContent() {
         await paymentService.reactivateSubscription(dbSubscription?.paddleSubscriptionId);
       }
     } else if (subscribeType === SubscribeTypes.UPGRADE) {
-      if (dbSubscription?.status !== SubscriptionStatus.CANCELED) {
-        try {
-          const upgraded = await paymentService.upgradeSubscription(dbSubscription?.paddleSubscriptionId)
-          if (upgraded) {
-            showSuccess('Subscription Upgraded', 'Your subscription has been successfully upgraded.');
-          } else {
-            showError('Upgrade Failed', 'Failed to upgrade subscription. Please try again later.');
-          }
-        } catch {
-          showError('Upgrade Failed', 'Failed to upgrade subscription. Please try again later.');
+      // Always use Paddle.js checkout for upgrades (user pays full price)
+      // Determine target plan for upgrade based on current plan and targetPlan parameter
+      let finalTargetPlan = targetPlan || 'pro';
+      let targetPriceId = '';
+      let targetPrice = '';
+      
+      if (dbSubscription?.plan?.name === 'starter') {
+        if (finalTargetPlan === 'plus') {
+          targetPriceId = getPaddlePriceId('plus', dbSubscription?.interval === 'year');
+          const targetPlanData = getPlanByName('plus');
+          targetPrice = targetPlanData ? (targetPlanData.price / 100).toFixed(2) : '0.00';
+        } else {
+          finalTargetPlan = 'pro';
+          targetPriceId = getPaddlePriceId('pro', dbSubscription?.interval === 'year');
+          const targetPlanData = getPlanByName('pro');
+          targetPrice = targetPlanData ? (targetPlanData.price / 100).toFixed(2) : '0.00';
         }
-      } else {
-        items = [
-          {
-            priceId: dbSubscription?.interval === 'month' ? 'pri_01jzvtps3cxzxfasnm66p9zv17' : 'pri_01jzvtqfqrzfx707b60n9gepax',
-            quantity: 1,
-          }
-        ];
-  
-        const planInfo = {
-          name: 'pro',
-          price: dbSubscription?.interval === 'month' ? '9.90' : '99',
-          interval: dbSubscription?.interval || 'month',
-          subscribeType: subscribeType,
-        }
-  
-        // Set the selected plan for summary display
-        setSelectedPlan(planInfo);
-    
-        // Wait a bit for the DOM to update, then open checkout
-        setTimeout(async () => {
-          let authToken: AuthToken | null = null;
-          if (user?.paddleCustomerId) {
-            try {
-              authToken = await paymentService.generateAuthTokenCustomer(user.paddleCustomerId);
-            } catch (error) {
-              console.error('Failed to generate auth token:', error);
-            }
-          }
-          
-          const checkoutOptions: Paddle.CheckoutOpenOptions = {
-            items: items,
-            customData: {
-              userId: user?.id,
-              planName: dbSubscription?.plan?.name,
-            },
-          };
-  
-          // Only add customerAuthToken if we have one
-          if (authToken?.customer_auth_token) {
-            checkoutOptions.customerAuthToken = authToken.customer_auth_token;
-          }
-  
-          Paddle.getPaddleInstance()?.Checkout.open(checkoutOptions);
-        }, 200);
+      } else if (dbSubscription?.plan?.name === 'pro') {
+        finalTargetPlan = 'plus';
+        targetPriceId = getPaddlePriceId('plus', dbSubscription?.interval === 'year');
+        const targetPlanData = getPlanByName('plus');
+        targetPrice = targetPlanData ? (targetPlanData.price / 100).toFixed(2) : '0.00';
       }
+      
+      items = [
+        {
+          priceId: targetPriceId,
+          quantity: 1,
+        }
+      ];
+
+      const planInfo = {
+        name: finalTargetPlan,
+        price: targetPrice,
+        interval: dbSubscription?.interval || 'month',
+        subscribeType: subscribeType,
+      }
+
+      // Set the selected plan for summary display
+      setSelectedPlan(planInfo);
+  
+      // Wait a bit for the DOM to update, then open checkout
+      setTimeout(async () => {
+        let authToken: AuthToken | null = null;
+        if (user?.paddleCustomerId) {
+          try {
+            authToken = await paymentService.generateAuthTokenCustomer(user.paddleCustomerId);
+          } catch (error) {
+            console.error('Failed to generate auth token:', error);
+          }
+        }
+        
+        const checkoutOptions: Paddle.CheckoutOpenOptions = {
+          items: items,
+          customData: {
+            userId: user?.id,
+            planName: finalTargetPlan,
+            isUpgrade: true,
+          },
+        };
+
+        // Only add customerAuthToken if we have one
+        if (authToken?.customer_auth_token) {
+          checkoutOptions.customerAuthToken = authToken.customer_auth_token;
+        }
+
+        Paddle.getPaddleInstance()?.Checkout.open(checkoutOptions);
+      }, 200);
     } else if (subscribeType === SubscribeTypes.DOWNGRADE) {
+      // Downgrades are always free and handled by backend only
       if (dbSubscription?.status !== SubscriptionStatus.CANCELED) {
         try {
-          const downgraded = await paymentService.downgradeSubscription(dbSubscription?.paddleSubscriptionId)
+          const downgraded = await paymentService.downgradeSubscription(dbSubscription?.paddleSubscriptionId, targetPlan)
           if (downgraded) {
-            showSuccess('Subscription Downgraded', 'Your subscription has been successfully downgraded.');
+            showSuccess('Subscription Downgraded', 'Your subscription has been successfully downgraded. The change will take effect at the end of your current billing cycle.');
             // Refresh subscription data
+            if (user?.id) {
+              await subscriptionService.loadUserSubscriptionData(user.id);
+            }
           } else {
             showError('Downgrade Failed', 'Failed to downgrade subscription. Please try again later.');
           }
@@ -218,49 +350,7 @@ function SubscriptionPageContent() {
           showError('Downgrade Failed', 'Failed to downgrade subscription. Please try again later.');
         }
       } else {
-        items = [
-          {
-            priceId: dbSubscription?.interval === 'month' ? 'pri_01jzvtb4tanwae3pv22fyewn0g' : 'pri_01jzvtd41z144brf89mj9nf69f',
-            quantity: 1,
-          }
-        ];
-  
-        const planInfo = {
-          name: 'starter',
-          price: dbSubscription?.interval === 'month' ? '5.90' : '59.80',
-          interval: dbSubscription?.interval || 'month',
-          subscribeType: subscribeType,
-        }
-  
-        // Set the selected plan for summary display
-        setSelectedPlan(planInfo);
-    
-        // Wait a bit for the DOM to update, then open checkout
-        setTimeout(async () => {
-          let authToken: AuthToken | null = null;
-          if (user?.paddleCustomerId) {
-            try {
-              authToken = await paymentService.generateAuthTokenCustomer(user.paddleCustomerId);
-            } catch (error) {
-              console.error('Failed to generate auth token:', error);
-            }
-          }
-          
-          const checkoutOptions: Paddle.CheckoutOpenOptions = {
-            items: items,
-            customData: {
-              userId: user?.id,
-              planName: dbSubscription?.plan?.name,
-            },
-          };
-  
-          // Only add customerAuthToken if we have one
-          if (authToken?.customer_auth_token) {
-            checkoutOptions.customerAuthToken = authToken.customer_auth_token;
-          }
-  
-          Paddle.getPaddleInstance()?.Checkout.open(checkoutOptions);
-        }, 200);
+        showError('Invalid Operation', 'Cannot downgrade a canceled subscription.');
       }
     }
   }
@@ -282,7 +372,6 @@ function SubscriptionPageContent() {
               // Start polling for subscription activation
               if (user?.id) {
                 await pollForSubscriptionActivation(user.id);
-                closeCheckout();
               }
             } else if (event.type === 'checkout.close') {
               console.log('Checkout closed');
@@ -303,6 +392,50 @@ function SubscriptionPageContent() {
       initializePaddleFunction();
     }, [isAuthenticated, showSuccess, user?.id]);
   
+  // Re-initialize Paddle when selectedPlan changes to ensure checkout container is ready
+  useEffect(() => {
+    const reinitializePaddle = async () => {
+      if (!isAuthenticated || !selectedPlan) return;
+      
+      // Small delay to ensure DOM element exists
+      setTimeout(async () => {
+        try {
+          await Paddle.initializePaddle({
+            token: process.env.NEXT_PUBLIC_PADDLE_KEY as string,
+            environment: 'sandbox',
+            eventCallback: async (event) => {
+              if (event.name === 'checkout.completed') {
+                console.log('Payment completed, starting subscription verification...');
+                showSuccess('Payment Successful', 'Your subscription has been updated successfully.');
+                setIsProcessingPayment(true);
+                
+                // Start polling for subscription activation
+                if (user?.id) {
+                  await pollForSubscriptionActivation(user.id);
+                }
+              } else if (event.type === 'checkout.close') {
+                console.log('Checkout closed');
+              }
+            },
+            checkout: {
+              settings: {
+                displayMode: 'inline',
+                variant: 'one-page',
+                theme: 'dark',
+                frameTarget: 'checkout-container',
+                frameInitialHeight: 600,
+                frameStyle: "width: 100%; height: 600px; background-color: oklch(0.16 0.028 264.665); border: 2px solid gray; border-radius: 8px; padding: 16px;"
+              }
+            }
+          });
+        } catch (err) {
+          console.error('Failed to reinitialize Paddle:', err);
+        }
+      }, 100);
+    };
+    
+    reinitializePaddle();
+  }, [selectedPlan, isAuthenticated, user?.id, showSuccess]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -316,7 +449,10 @@ function SubscriptionPageContent() {
         console.error('Failed to load subscription data:', err);
       });
     }
-  }, [isAuthenticated, user?.id, router]);
+
+    // Fetch subscription plans
+    fetchSubscriptionPlans();
+  }, [isAuthenticated, user?.id, router, fetchSubscriptionPlans]);
 
   const handleCancelSubscription = async () => {
     setShowCancelModal(true);
@@ -358,21 +494,12 @@ function SubscriptionPageContent() {
     }
   };
 
-  const confirmUpgrade = async () => {
-    setIsProcessingUpgrade(true);
-    setShowUpgradeModal(false);
-    await executeCheckout(SubscribeTypes.UPGRADE);
-    setIsProcessingUpgrade(false);
-    // Refresh subscription data
-    if (user?.id) {
-      await subscriptionService.loadUserSubscriptionData(user.id);
-    }
-  };
+
 
   const confirmDowngrade = async () => {
     setIsProcessingDowngrade(true);
     setShowDowngradeModal(false);
-    await executeCheckout(SubscribeTypes.DOWNGRADE);
+    await executeCheckout(SubscribeTypes.DOWNGRADE, currentTargetPlan);
     // Refresh subscription data
     setIsProcessingDowngrade(false);
     if (user?.id) {
@@ -396,7 +523,7 @@ function SubscriptionPageContent() {
   const confirmReactivate = async () => {
     setIsProcessing(true);
     setShowReactivateModal(false);
-    await executeCheckout(SubscribeTypes.REACTIVATE);
+    await executeCheckout(SubscribeTypes.REACTIVATE, currentTargetPlan);
     setIsProcessing(false);
     // Show success message
     showSuccess('Subscription Reactivated', 'Your subscription has been successfully reactivated.');
@@ -409,9 +536,8 @@ function SubscriptionPageContent() {
 
 
   const closeCheckout = () => {
-      Paddle.getPaddleInstance()?.Checkout.close();
-      setSelectedPlan(null);
-    }
+    setSelectedPlan(null);
+  }
 
   // Show loading while processing payment
   if (isProcessingPayment) {
@@ -531,7 +657,7 @@ function SubscriptionPageContent() {
                   <>
                     <li>• Your subscription will remain active and won&apos;t be canceled</li>
                     <li>• You&apos;ll keep access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                    <li>• You&apos;ll keep access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
+                    <li>• You&apos;ll keep access to Unlimited PDF page uploads per month</li>
                     <li>• You&apos;ll continue to be billed ${planPrice} per {dbSubscription?.interval || 'month'}</li>
                     <li>• No additional charges apply</li>
                   </>
@@ -539,7 +665,7 @@ function SubscriptionPageContent() {
                   <>
                     <li>• You&apos;ll be charged ${planPrice} for your {planName} plan</li>
                     <li>• You&apos;ll regain immediate access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                    <li>• You&apos;ll regain immediate access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
+                    <li>• You&apos;ll regain immediate access to Unlimited PDF page uploads per month</li>
                     <li>• You&apos;ll regain access to premium features and priority support</li>
                     <li>• Your billing cycle will resume normally</li>
                   </>
@@ -603,7 +729,7 @@ function SubscriptionPageContent() {
               <h4 className="text-sm font-medium text-text-primary mb-2">What will happen:</h4>
               <ul className="text-sm text-secondary space-y-1">
                 <li>• You will lose access to {dbSubscription?.plan?.messagesLimit || 0} AI chat messages per month</li>
-                <li>• You will lose access to {dbSubscription?.plan?.filePagesLimit || 0} PDF pages uploads per month</li>
+                <li>• You will lose access to Unlimited PDF page uploads per month</li>
                 <li>• You will lose access to premium features and priority support</li>
                 <li>• If you have a downgrade scheduled to a lower plan, it will be canceled and you won&apos;t be charged when the cancellation takes effect.</li>
               </ul>
@@ -631,84 +757,21 @@ function SubscriptionPageContent() {
     );
   };
 
-  // Upgrade Confirmation Modal Component
-  const UpgradeConfirmationModal = () => {
-    if (!showUpgradeModal) return null;
 
-    const isScheduledCancel = dbSubscription?.scheduledCancel;
-
-    return (
-      <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-        <div className="bg-background-secondary rounded-2xl max-w-md w-full mx-4 shadow-xl border border-secondary">
-          <div className="p-6">
-            {/* Icon */}
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-primary border-2 border-accent-100/40 rounded-full flex items-center justify-center">
-                <svg className="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16l-4-4m0 0l4-4m-4 4h18m-4-4v8" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Title */}
-            <h3 className="text-xl font-semibold text-text-primary text-center mb-2">
-              Upgrade to Pro Plan?
-            </h3>
-
-            {/* Description */}
-            <p className="text-secondary text-center mb-4 leading-relaxed">
-              {isScheduledCancel 
-                ? "You currently have a canceled subscription. Upgrading will reactivate your subscription with the Pro plan."
-                : "You're about to upgrade from Starter to Pro plan."
-              }
-            </p>
-
-            {/* Billing Details */}
-            <div className="bg-primary border border-accent-100/60 rounded-lg p-4 mb-6">
-              <h4 className="text-sm font-medium text-accent mb-2">Billing Details:</h4>
-              <ul className="text-xs text-accent-100/60 space-y-1">
-                {isScheduledCancel ? (
-                  <>
-                    <li>• You&apos;ll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
-                    <li>• You&apos;ll get immediate access to all Pro features</li>
-                    <li>• The AI messages that you didn&apos;t use will be added to your new limit</li>
-                  </>
-                ) : (
-                  <>
-                    <li>• You&apos;ll be charged ${dbSubscription?.interval === 'month' ? '9.90' : '99.00'} for the Pro plan immediately</li>
-                    <li>• You&apos;ll get immediate access to all Pro features (500 PDFs, 400 AI messages, priority support)</li>
-                    <li>• The AI messages that you didn&apos;t use will be added to your new limit</li>
-                  </>
-                )}
-              </ul>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                onClick={() => setShowUpgradeModal(false)}
-                className="flex-1 bg-primary hover:bg-secondary text-text-primary font-semibold py-3 px-4 rounded-lg border border-secondary transition-colors duration-200 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmUpgrade}
-                className="flex-1 bg-accent hover:bg-accent-300 text-primary font-semibold py-3 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
-              >
-                Yes, Upgrade to Pro
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   // Downgrade Confirmation Modal Component
   const DowngradeConfirmationModal = () => {
-    if (!showDowngradeModal) return null;
+    if (!showDowngradeModal || !selectedPlan) return null;
 
     const isScheduledCancel = dbSubscription?.scheduledCancel;
+    const currentPlan = dbSubscription?.plan?.name || 'pro';
+    const targetPlan = selectedPlan.name?.toLowerCase() || 'starter';
+    const targetPlanName = selectedPlan.name || 'Starter';
+    const currentPlanName = currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1);
+    
+    const getTargetPrice = () => {
+      return selectedPlan.price || '0.00';
+    };
 
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
@@ -725,14 +788,14 @@ function SubscriptionPageContent() {
 
             {/* Title */}
             <h3 className="text-xl font-semibold text-text-primary text-center mb-2">
-              Downgrade to Starter plan?
+              Downgrade to {targetPlanName} plan?
             </h3>
 
             {/* Description */}
             <p className="text-secondary text-center mb-4 leading-relaxed">
               {isScheduledCancel 
-                ? "You currently have a canceled subscription. Downgrading will reactivate your subscription with the Starter plan."
-                : "You're about to downgrade from Pro to Starter plan."
+                ? `You currently have a canceled subscription. Downgrading will reactivate your subscription with the ${targetPlanName} plan.`
+                : `You're about to downgrade from ${currentPlanName} to ${targetPlanName} plan.`
               }
             </p>
 
@@ -742,19 +805,19 @@ function SubscriptionPageContent() {
               <ul className="text-xs text-yellow-500/70 space-y-1">
                 {isScheduledCancel ? (
                   <>
-                    <li>• You&apos;ll lose Pro plan benefits when your next billing period starts on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
-                    <li>• Your AI chat messages will be limited to 200 per month (currently 400)</li>
-                    <li>• Your PDF pages uploads will be limited to 2000 per month (currently 5000)</li>
+                    <li>• You&apos;ll lose {currentPlanName} plan benefits when your next billing period starts on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
+                    <li>• Your AI chat messages will be limited to {getPlanByName(targetPlan)?.messagesLimit || (targetPlan === 'starter' ? 200 : 400)} per month (currently {getPlanByName(currentPlan)?.messagesLimit || (currentPlan === 'plus' ? 1000 : 400)})</li>
+                    <li>• Your PDF page uploads will be Unlimited per month</li>
                     <li>• You&apos;ll lose priority support</li>
-                    <li>• Starting next billing cycle, you&apos;ll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
+                    <li>• Starting next billing cycle, you&apos;ll be charged ${getTargetPrice()} for the {targetPlanName} plan</li>
                   </>
                 ) : (
                   <>
-                    <li>• You&apos;ll lose Pro plan benefits at your next billing period on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
-                    <li>• Your AI chat messages will be limited to 200 per month (currently 400)</li>
-                    <li>• Your PDF pages uploads will be limited to 2000 per month (currently 5000)</li>
+                    <li>• You&apos;ll lose {currentPlanName} plan benefits at your next billing period on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}</li>
+                    <li>• Your AI chat messages will be limited to {getPlanByName(targetPlan)?.messagesLimit || (targetPlan === 'starter' ? 200 : 400)} per month (currently {getPlanByName(currentPlan)?.messagesLimit || (currentPlan === 'plus' ? 1000 : 400)})</li>
+                    <li>• Your PDF page uploads will be Unlimited per month</li>
                     <li>• You&apos;ll lose priority support</li>
-                    <li>• Starting next billing cycle, you&apos;ll be charged ${dbSubscription?.interval === 'month' ? '5.90' : '59.80'} for the Starter plan</li>
+                    <li>• Starting next billing cycle, you&apos;ll be charged ${getTargetPrice()} for the {targetPlanName} plan</li>
                   </>
                 )}
               </ul>
@@ -784,6 +847,10 @@ function SubscriptionPageContent() {
   const CancelDowngradeConfirmationModal = () => {
     if (!showCancelDowngradeModal) return null;
 
+    const originalPlanName = dbSubscription?.nameBeforeDowngrade ? dbSubscription.nameBeforeDowngrade.charAt(0).toUpperCase() + dbSubscription.nameBeforeDowngrade.slice(1) : getCurrentDisplayPlan().charAt(0).toUpperCase() + getCurrentDisplayPlan().slice(1);
+    const targetPlanName = dbSubscription?.plan?.name ? dbSubscription.plan.name.charAt(0).toUpperCase() + dbSubscription.plan.name.slice(1) : 'Starter';
+    const originalPlan = getPlanByName(dbSubscription?.nameBeforeDowngrade || getCurrentDisplayPlan());
+
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
         <div className="bg-background-secondary rounded-2xl max-w-md w-full mx-4 shadow-xl border border-secondary">
@@ -799,22 +866,22 @@ function SubscriptionPageContent() {
 
             {/* Title */}
             <h3 className="text-xl font-semibold text-text-primary text-center mb-2">
-              Cancel Downgrade to Starter Plan?
+              Cancel Downgrade to {targetPlanName} Plan?
             </h3>
 
             {/* Description */}
             <p className="text-secondary text-center mb-4 leading-relaxed">
-              You currently have a downgrade scheduled. Canceling will keep you on the Pro plan.
+              You currently have a downgrade scheduled. Canceling will keep you on the {originalPlanName} plan.
             </p>
 
             {/* Warning Details */}
             <div className="bg-yellow-500/10 border border-yellow-500/50 rounded-lg p-4 mb-6">
               <h4 className="text-sm font-medium text-yellow-500 mb-2">What will happen:</h4>
               <ul className="text-xs text-yellow-500/70 space-y-1">
-                <li>• You&apos;ll keep all Pro plan benefits</li>
-                <li>• Your AI chat messages will remain at 400 per month</li>
-                <li>• Your PDF pages uploads will remain at 5000 per month</li>
-                <li>• You won&apos;t be charged for the Starter plan</li>
+                <li>• You&apos;ll keep all {originalPlanName} plan benefits</li>
+                <li>• Your AI chat messages will remain at {originalPlan?.messagesLimit || 0} per month</li>
+                <li>• Your PDF page uploads will be {originalPlan?.filePagesLimit === -1 ? 'Unlimited' : originalPlan?.filePagesLimit || 0} per month</li>
+                <li>• You won&apos;t be charged for the {targetPlanName} plan</li>
               </ul>
             </div>
 
@@ -830,7 +897,7 @@ function SubscriptionPageContent() {
                 onClick={cancelDowngrade}
                 className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 cursor-pointer"
               >
-                Keep Pro Plan
+                Keep {originalPlanName} Plan
               </button>
             </div>
           </div>
@@ -843,7 +910,7 @@ function SubscriptionPageContent() {
     <>
       <ReactivateConfirmationModal />
       <CancelConfirmationModal />
-      <UpgradeConfirmationModal />
+
       <DowngradeConfirmationModal />
       <CancelDowngradeConfirmationModal />
       
@@ -853,7 +920,7 @@ function SubscriptionPageContent() {
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-text-primary mb-2">Subscription Management</h1>
-            <p className="text-secondary">Manage your RefDoc AI subscription and usage</p>
+            <p className="text-secondary">Manage your PDFizz AI subscription and usage</p>
           </div>
 
           {/* Current Plan Card */}
@@ -861,7 +928,10 @@ function SubscriptionPageContent() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
               <div>
                 <h2 className="text-2xl font-semibold text-text-primary mb-2">
-                  {dbSubscription?.plan?.name === 'starter' ? 'Starter' : dbSubscription?.plan?.name === 'pro' ? 'Pro' : 'Enterprise'} Plan
+                  {(() => {
+                    const displayPlan = getCurrentDisplayPlan();
+                    return displayPlan === 'starter' ? 'Starter' : displayPlan === 'pro' ? 'Pro' : displayPlan === 'plus' ? 'Plus' : 'Enterprise';
+                  })()} Plan
                 </h2>
                 <div className="flex items-center space-x-3">
                   {getStatusBadge(dbSubscription.scheduledCancel ? SubscriptionStatus.CANCELED : dbSubscription.status === SubscriptionStatus.ACTIVE ? SubscriptionStatus.ACTIVE : dbSubscription.status)}
@@ -874,7 +944,18 @@ function SubscriptionPageContent() {
               </div>
               <div className="mt-4 md:mt-0 text-right">
                 <div className="text-3xl font-bold text-accent">
-                  ${dbSubscription.plan ? (dbSubscription.plan.price / 100).toFixed(2) : '0.00'}
+                  ${(() => {
+                    if (!dbSubscription?.plan) return '0.00';
+                    
+                    // If user has downgraded, show the price of the current active plan
+                    if (dbSubscription.hasDowngraded) {
+                      const displayPlan = getCurrentDisplayPlan();
+                      const originalPlan = getPlanByName(displayPlan);
+                      return originalPlan ? (originalPlan.price / 100).toFixed(2) : (dbSubscription.plan.price / 100).toFixed(2);
+                    }
+                    
+                    return (dbSubscription.plan.price / 100).toFixed(2);
+                  })()}
                 </div>
                 <div className="text-secondary text-sm">
                   per {dbSubscription.interval === 'month' ? 'month' : 'year'}
@@ -926,8 +1007,8 @@ function SubscriptionPageContent() {
                     <div>
                       <h4 className="text-yellow-400 font-medium">Subscription Set to Downgrade</h4>
                       <p className="text-yellow-500/60 text-sm">
-                        Your subscription is set to downgrade to the <span className="font-semibold">Starter</span> plan on {new Date(dbSubscription.nextBillingAt).toLocaleDateString()}. 
-                        You&apos;ll continue to have access to {dbSubscription.plan?.name === PlanName.STARTER ? 'Starter' : dbSubscription.plan?.name === PlanName.PRO ? 'Pro' : 'Enterprise'} until then.
+                        Your subscription is set to downgrade to the <span className="font-semibold">{dbSubscription.plan?.name === PlanName.STARTER ? 'Starter' : dbSubscription.plan?.name === PlanName.PRO ? 'Pro' : 'Enterprise'}</span> plan on {new Date(dbSubscription.nextBillingAt).toLocaleDateString()}. 
+                        You&apos;ll continue to have access to {dbSubscription.nameBeforeDowngrade ? dbSubscription.nameBeforeDowngrade.charAt(0).toUpperCase() + dbSubscription.nameBeforeDowngrade.slice(1) : getCurrentDisplayPlan().charAt(0).toUpperCase() + getCurrentDisplayPlan().slice(1)} until then.
                       </p>
                     </div>
                   </div>
@@ -951,12 +1032,34 @@ function SubscriptionPageContent() {
               <UsageBar
                 label="AI Chat Messages"
                 used={subscriptionUsage?.messagesUsed || 0}
-                limit={(dbSubscription.plan?.messagesLimit || 0) + (dbSubscription.messagesLeftBeforeUpgrade || 0)}
+                limit={(() => {
+                  if (!dbSubscription?.plan) return 0;
+                  
+                  // If user has downgraded, show limits for the current active plan
+                  if (dbSubscription.hasDowngraded) {
+                    const displayPlan = getCurrentDisplayPlan();
+                    const originalPlan = getPlanByName(displayPlan);
+                    return (originalPlan?.messagesLimit || dbSubscription.plan.messagesLimit) + (dbSubscription.messagesLeftBeforeUpgrade || 0);
+                  }
+                  
+                  return dbSubscription.plan.messagesLimit + (dbSubscription.messagesLeftBeforeUpgrade || 0);
+                })()}
               />
               <UsageBar
-                label="PDF Pages Uploads"
+                label="PDF Page Uploads"
                 used={userFilePagesCount?.totalFilePages || 0}
-                limit={(dbSubscription.plan?.filePagesLimit || 0) + (dbSubscription.filePagesLeftBeforeUpgrade || 0)}
+                limit={(() => {
+                  if (!dbSubscription?.plan) return 0;
+                  
+                  // If user has downgraded, show limits for the current active plan
+                  if (dbSubscription.hasDowngraded) {
+                    const displayPlan = getCurrentDisplayPlan();
+                    const originalPlan = getPlanByName(displayPlan);
+                    return (originalPlan?.filePagesLimit || dbSubscription.plan.filePagesLimit) + (dbSubscription.filePagesLeftBeforeUpgrade || 0);
+                  }
+                  
+                  return dbSubscription.plan.filePagesLimit + (dbSubscription.filePagesLeftBeforeUpgrade || 0);
+                })()}
               />
             </div>
           </div>
@@ -984,39 +1087,109 @@ function SubscriptionPageContent() {
                   </button>
                 </div>
               )}
-              {(dbSubscription?.plan?.name === 'pro' && !dbSubscription.hasDowngraded) && (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
-                  <div>
-                    <h3 className="text-text-primary font-medium">Downgrade to Starter</h3>
-                    <p className="text-secondary text-sm">
-                      Switch to Starter plan ($5.90/month). Changes take effect at next billing cycle.
-                    </p>
+              {getCurrentDisplayPlan() === 'pro' && (
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
+                    <div>
+                      <h3 className="text-text-primary font-medium">Upgrade to Plus</h3>
+                      <p className="text-secondary text-sm">
+                        Switch to Plus plan (${getPlanPrice('plus', false)}/month). Upgrade takes effect immediately.
+                      </p>
+                    </div>
+                    <button
+                       onClick={() => openCheckout(SubscribeTypes.UPGRADE, 'plus')}
+                       disabled={isProcessingUpgrade}
+                       className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                     >
+                       {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Plus'}
+                     </button>
                   </div>
-                  <button
-                    onClick={() => openCheckout(SubscribeTypes.DOWNGRADE)}
-                    disabled={isProcessingDowngrade}
-                    className="mt-3 sm:mt-0 bg-yellow-600 hover:bg-yellow-700 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
-                  >
-                    {isProcessingDowngrade ? 'Processing...' : 'Downgrade to Starter'}
-                  </button>
-                </div>
+                  {!dbSubscription.hasDowngraded && (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
+                      <div>
+                        <h3 className="text-text-primary font-medium">Downgrade to Starter</h3>
+                        <p className="text-secondary text-sm">
+                          Switch to Starter plan (${getPlanPrice('starter', false)}/month). Changes take effect at next billing cycle.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => openCheckout(SubscribeTypes.DOWNGRADE, 'starter')}
+                        disabled={isProcessingDowngrade}
+                        className="mt-3 sm:mt-0 bg-yellow-600 hover:bg-yellow-700 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isProcessingDowngrade ? 'Processing...' : 'Downgrade to Starter'}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
-              {dbSubscription.plan?.name === 'starter' && (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
-                  <div>
-                    <h3 className="text-text-primary font-medium">Upgrade to Pro</h3>
-                    <p className="text-secondary text-sm">
-                      Switch to Pro plan ($9.90/month). Upgrade takes effect immediately.
-                    </p>
+              {getCurrentDisplayPlan() === 'starter' && (
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
+                    <div>
+                      <h3 className="text-text-primary font-medium">Upgrade to Pro</h3>
+                      <p className="text-secondary text-sm">
+                        Switch to Pro plan (${getPlanPrice('pro', false)}/month). Upgrade takes effect immediately.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => openCheckout(SubscribeTypes.UPGRADE, 'pro')}
+                      disabled={isProcessingUpgrade}
+                      className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Pro'}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => openCheckout(SubscribeTypes.UPGRADE)}
-                    disabled={isProcessingUpgrade}
-                    className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
-                  >
-                    {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Pro'}
-                  </button>
-                </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
+                    <div>
+                      <h3 className="text-text-primary font-medium">Upgrade to Plus</h3>
+                      <p className="text-secondary text-sm">
+                        Switch to Plus plan (${getPlanPrice('plus', false)}/month). Upgrade takes effect immediately.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => openCheckout(SubscribeTypes.UPGRADE, 'plus')}
+                      disabled={isProcessingUpgrade}
+                      className="mt-3 sm:mt-0 bg-accent hover:bg-accent-300 text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isProcessingUpgrade ? 'Processing...' : 'Upgrade to Plus'}
+                    </button>
+                  </div>
+                </>
+              )}
+              {getCurrentDisplayPlan() === 'plus' && !dbSubscription.hasDowngraded && (
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
+                    <div>
+                      <h3 className="text-text-primary font-medium">Downgrade to Pro</h3>
+                      <p className="text-secondary text-sm">
+                        Switch to Pro plan (${getPlanPrice('pro', false)}/month). Changes take effect at next billing cycle.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => openCheckout(SubscribeTypes.DOWNGRADE, 'pro')}
+                      disabled={isProcessingDowngrade}
+                      className="mt-3 sm:mt-0 bg-yellow-600 hover:bg-yellow-700 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isProcessingDowngrade ? 'Processing...' : 'Downgrade to Pro'}
+                    </button>
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border border-secondary rounded-lg">
+                    <div>
+                      <h3 className="text-text-primary font-medium">Downgrade to Starter</h3>
+                      <p className="text-secondary text-sm">
+                        Switch to Starter plan (${getPlanPrice('starter', false)}/month). Changes take effect at next billing cycle.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => openCheckout(SubscribeTypes.DOWNGRADE, 'starter')}
+                      disabled={isProcessingDowngrade}
+                      className="mt-3 sm:mt-0 bg-yellow-600 hover:bg-yellow-700 text-text-primary font-semibold py-2 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isProcessingDowngrade ? 'Processing...' : 'Downgrade to Starter'}
+                    </button>
+                  </div>
+                </>
               )}
               {/* Reactivate Subscription */}
               {dbSubscription.scheduledCancel && (
@@ -1024,7 +1197,7 @@ function SubscriptionPageContent() {
                   <div>
                     <h3 className="font-medium text-accent">Reactivate Subscription</h3>
                     <p className="text-secondary text-sm">
-                      Resume your {(dbSubscription.plan) && (dbSubscription.plan.name === 'starter' ? 'Starter' : dbSubscription.plan.name === 'pro' ? 'Pro' : 'Enterprise')} plan before it expires.
+                      Resume your {(dbSubscription.plan) && (dbSubscription.plan.name === 'starter' ? 'Starter' : dbSubscription.plan.name === 'pro' ? 'Pro' : dbSubscription.plan.name === 'plus' ? 'Plus' : 'Enterprise')} plan before it expires.
                     </p>
                   </div>
                   <button
@@ -1048,118 +1221,104 @@ function SubscriptionPageContent() {
             </button>
           </div>
 
-          {isAuthenticated && selectedPlan && (
-          <div 
-            className="fixed inset-0 flex items-center justify-center z-50"
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
-          >
-            <div className="flex gap-6 max-w-6xl w-full mx-4">
-              {/* Checkout Container */}
-              <div className="flex-1 min-h-[600px] bg-background-secondary rounded-lg">
-                <div 
-                  className='checkout-container'
-                  style={{ minHeight: '600px', width: '100%' }}
-                >
-                  {/* This div will be populated by Paddle */}
-                </div>
+
+        </div>
+      </div>
+      
+      {/* Checkout Modal - Fixed overlay like pricing page */}
+      {selectedPlan && (
+        <div 
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+        >
+          <div className="flex gap-6 max-w-6xl w-full mx-4">
+            {/* Checkout Container */}
+            <div className="flex-1 min-h-[600px] bg-background-secondary rounded-lg">
+              <div 
+                className='checkout-container'
+                style={{ minHeight: '600px', width: '100%' }}
+              >
+                {/* This div will be populated by Paddle */}
               </div>
+            </div>
+            
+            {/* Plan Summary - Only show on larger screens */}
+            <div className="hidden relative lg:block w-80 bg-background-secondary rounded-2xl p-6 border border-secondary min-h-[600px]">
+              {/* Close Button */}
+              <button 
+                onClick={closeCheckout}
+                className="absolute top-4 right-4 w-8 h-8 hover:bg-opacity-100 text-text-primary rounded-full flex items-center justify-center text-2xl font-bold cursor-pointer z-60"
+              >
+                ×
+              </button>
+              <h3 className="text-xl font-semibold text-text-primary mb-4">Order Summary</h3>
               
-              {/* Plan Summary - Only show on larger screens */}
-              <div className="hidden relative lg:block w-80 bg-background-secondary rounded-2xl p-6 border border-secondary min-h-[600px]">
-                {/* Close Button */}
-                <button 
-                  onClick={closeCheckout}
-                  className="absolute top-4 right-4 w-8 h-8 hover:bg-opacity-100 text-text-primary rounded-full flex items-center justify-center text-2xl font-bold cursor-pointer z-60"
-                >
-                  ×
-                </button>
-                <h3 className="text-xl font-semibold text-text-primary mb-4">Order Summary</h3>
+              <div className="space-y-4">
+                {/* Plan Name */}
+                <div>
+                  <h4 className="text-lg font-medium text-text-primary">{selectedPlan.name && selectedPlan.name?.charAt(0).toUpperCase() + selectedPlan.name?.slice(1)} Plan</h4>
+
+                  <span className="inline-block bg-accent text-primary px-2 py-1 rounded-full text-xs font-semibold mt-1">
+                    {selectedPlan.subscribeType === 'upgrade' ? 'Upgrade' : selectedPlan.subscribeType === 'downgrade' ? 'Downgrade' : selectedPlan.subscribeType === 'reactivate' ? 'Reactivation' : 'Subscription'}
+                  </span>
+                </div>
                 
-                <div className="space-y-4">
-                  {/* Plan Name */}
-                  <div>
-                    <h4 className="text-lg font-medium text-text-primary">{selectedPlan.name === 'starter' ? 'Starter' : selectedPlan.name === 'pro' ? 'Pro' : 'Enterprise'} Plan</h4>
+                {/* Pricing */}
+                <div className="border-t border-secondary pt-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-secondary">Price</span>
+                    <span className="text-text-primary font-semibold">
+                      ${selectedPlan.price}/{selectedPlan.interval === 'year' ? 'year' : 'month'}
+                    </span>
                   </div>
                   
-                  {/* Pricing */}
-                  <div className="border-t border-secondary pt-4">
+                  {selectedPlan.interval === 'year' && (
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-secondary">Price</span>
-                      <span className="text-text-primary font-semibold">
-                        ${Number(selectedPlan.price).toFixed(2)}/{selectedPlan.interval === 'annually' ? 'year' : 'month'}
-                      </span>
+                      <span className="text-secondary">Billed</span>
+                      <span className="text-text-primary">Annually</span>
                     </div>
-                    
-                    {selectedPlan.interval === 'annually' && (
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-secondary">Billed</span>
-                        <span className="text-text-primary">Annually</span>
-                      </div>
-                    )}
-                  </div>
+                  )}
                   
-                  {/* Features Summary */}
-                  <div className="border-t border-secondary pt-4">
-                    <h5 className="text-sm font-medium text-text-primary mb-2">What&apos;s included:</h5>
-                    <ul className="text-sm text-secondary space-y-1">
-                      {selectedPlan.name === 'starter' ? (
-                        <>
-                          <li>• 2000 PDF pages uploads</li>
-                          <li>• 200 AI chat messages</li>
-                          <li>• Email support</li>
-                        </>
-                      ) : (
-                        <>
-                          <li>• 5000 PDF pages uploads</li>
-                          <li>• 400 AI chat messages</li>
-                          <li>• Priority support</li>
-                        </>
-                      )}
-                    </ul>
-                  </div>
-
-                  {/* Subscription Type Messages */}
-                  <div className="border-t border-secondary pt-4">
-                    {selectedPlan.subscribeType === SubscribeTypes.DOWNGRADE && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <h6 className="text-sm font-medium text-blue-800 mb-1">Plan Change Details</h6>
-                        <p className="text-xs text-blue-700 mb-2">
-                          You will keep all Pro plan benefits until the end of your current billing period on {new Date(dbSubscription?.nextBillingAt || '').toLocaleDateString()}.
-                        </p>
-                        <p className="text-xs text-blue-700">
-                          Starting your next billing cycle, you will be charged ${selectedPlan.price} for the Starter plan.
-                        </p>
-                      </div>
-                    )}
-
-                    {selectedPlan.subscribeType === SubscribeTypes.UPGRADE && (
-                      <div className="bg-accent/10 border border-accent/30 rounded-lg p-3">
-                        <h6 className="text-sm font-medium text-accent mb-1">Upgrade Details</h6>
-                        <p className="text-sm text-secondary mb-2">
-                          You will only be charged the difference between your current Starter plan and the Pro plan, prorated based on your current billing period.
-                        </p>
-                        <p className="text-sm text-secondary">
-                          Starting your next billing cycle, you will be charged ${selectedPlan.price} for the Pro plan.
-                        </p>
-                      </div>
-                    )}
-
-                    {selectedPlan.subscribeType === SubscribeTypes.REACTIVATE && (
-                      <div className="bg-accent/10 border border-accent/30 rounded-lg p-3">
-                        <h6 className="text-sm font-medium text-accent mb-1">Reactivation Details</h6>
-                        <p className="text-sm text-secondary">
-                          Your {selectedPlan.name} plan will be reactivated and you&apos;ll regain access to all features immediately.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                  {selectedPlan.subscribeType === 'upgrade' && (
+                    <div className="bg-accent bg-opacity-10 rounded-lg p-3 mt-3">
+                      <p className="text-sm text-primary font-medium">
+                        Upgrade takes effect immediately
+                      </p>
+                      <p className="text-xs text-secondary mt-1">
+                        You'll be charged the full amount and receive both new plan features and remaining features from your previous plan's billing cycle
+                      </p>
+                    </div>
+                  )}
+                  
+                  {selectedPlan.subscribeType === 'reactivate' && (
+                    <div className="bg-accent bg-opacity-10 rounded-lg p-3 mt-3">
+                      <p className="text-sm text-primary font-medium">
+                        Reactivate your subscription
+                      </p>
+                      <p className="text-xs text-secondary mt-1">
+                        Your subscription will be reactivated immediately
+                      </p>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Features Summary */}
+                <div className="border-t border-secondary pt-4">
+                  <h5 className="text-sm font-medium text-text-primary mb-2">What's included:</h5>
+                  <ul className="text-sm text-secondary space-y-1">
+                    <li>• Unlimited PDF page uploads</li>
+                    <li>• {selectedPlan.name === 'Plus' || selectedPlan.name === 'plus' ? 'Unlimited' : getPlanByName(selectedPlan.name?.toLowerCase() || '')?.messagesLimit || 'N/A'} AI chat messages</li>
+                    <li>• {selectedPlan.name === 'Starter' || selectedPlan.name === 'starter' ? 'Email support' : 'Priority support'}</li>
+                  </ul>
                 </div>
               </div>
             </div>
           </div>
-        )}
         </div>
-      </div>
+      )}
+      
+      {/* Fallback for when no plan is selected but checkout container is needed */}
+      {!selectedPlan && <div className='checkout-container'></div>}
     </>
   );
 }

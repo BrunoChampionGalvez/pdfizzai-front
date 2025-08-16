@@ -4,7 +4,7 @@ import { PDFViewerProvider } from "../contexts/PDFViewerContext";
 import AuthGuard from "../components/AuthGuard";
 
 export const metadata: Metadata = {
-  title: "RefDoc AI - AI-Powered PDF Chat",
+  title: "PDFizz AI - AI-Powered PDF Chat",
   description: "Upload PDFs and chat with AI about their contents",
 };
 

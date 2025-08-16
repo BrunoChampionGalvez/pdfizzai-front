@@ -76,7 +76,7 @@ export default function AppPage() {
             
             if (!hasAccess && !userIsSubscriptionActive) {
               console.log('User does not have active subscription, but allowing app access with prompts');
-              setError('Subscribe to unlock full access to RefDoc AI features');
+              setError('Subscribe to unlock full access to PDFizz AI features');
             } else if (!userIsSubscriptionActive) {
               // User has canceled subscription but still has access until end of billing period
               console.log('User has canceled subscription but retains access until billing period ends');

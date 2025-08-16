@@ -1,6 +1,6 @@
-# RefDoc AI Frontend
+# PDFizz AI Frontend
 
-Frontend for RefDoc AI - an application for uploading PDFs and chatting with AI about their contents.
+Frontend for PDFizz AI - an application for uploading PDFs and chatting with AI about their contents.
 
 ## Technologies
 
