@@ -113,7 +113,7 @@ export default function FileList({ files }: FileListProps) {
         }}
         title="Delete File"
       >
-        <div className="space-y-4">
+        <div className="space-y-4 z-50">
           <p className="text-sm text-text-primary">
             Are you sure you want to delete the file &quot;{fileToDelete?.filename ?? 'File loading.'}&quot;? This action cannot be undone.
           </p>

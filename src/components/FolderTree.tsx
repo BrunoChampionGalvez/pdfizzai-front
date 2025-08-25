@@ -829,7 +829,7 @@ export default function FolderTree() {
         }}
         title="Create New Folder"
       >
-        <div className="space-y-4">
+        <div className="space-y-4 z-50">
           <div>
             <label htmlFor="folder-name" className="block text-sm font-medium text-text-primary">
               Folder name:

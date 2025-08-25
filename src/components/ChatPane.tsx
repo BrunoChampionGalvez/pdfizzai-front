@@ -657,7 +657,7 @@ export default function ChatPane() {
               {showMentionSearch && (
                 <div className="relative mb-3" ref={searchResultsRef}>
                   {mentionSearchQuery && (
-                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-primary border border-secondary rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-primary border border-secondary rounded-md shadow-lg z-40 max-h-60 overflow-y-auto">
                       {isSearching ? (
                         <div className="p-3 text-center text-text-secondary">Searching...</div>
                       ) : searchResults.length === 0 ? (
@@ -738,7 +738,7 @@ export default function ChatPane() {
                 </div>
               )}
 
-              <div className="flex items-end w-full min-h-[4rem] relative z-50">
+              <div className="flex items-end w-full min-h-[4rem] relative z-40">
                 <textarea
                   value={message}
                   onChange={handleMessageChange}
@@ -836,7 +836,7 @@ export default function ChatPane() {
           {showMentionSearch && (
             <div className="relative mb-3" ref={searchResultsRef}>
               {mentionSearchQuery && (
-                <div className="absolute bottom-full left-0 right-0 mb-1 bg-primary border border-secondary rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                <div className="absolute bottom-full left-0 right-0 mb-1 bg-primary border border-secondary rounded-md shadow-lg z-40 max-h-60 overflow-y-auto">
                   {isSearching ? (
                     <div className="p-3 text-center text-text-secondary">Searching...</div>
                   ) : searchResults.length === 0 ? (
@@ -917,7 +917,7 @@ export default function ChatPane() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="flex items-end relative z-50">
+          <form onSubmit={handleSubmit} className="flex items-end relative z-40">
             <textarea
               value={message}
               onChange={handleMessageChange}
