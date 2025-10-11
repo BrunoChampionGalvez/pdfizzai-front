@@ -371,7 +371,7 @@ export default function PricingPage() {
                 <h3 className="text-2xl font-semibold text-text-primary mb-4">Starter</h3>
                 <div className="mb-6">
                   <span className="text-4xl font-bold text-accent">
-                    ${getPlanPrice('starter', isAnnual)}
+                    ${getPlanPrice('Starter', isAnnual)}
                   </span>
                   <span className="text-secondary">/{isAnnual ? 'month' : 'month'}</span>
                   {isAnnual && (
@@ -583,7 +583,7 @@ export default function PricingPage() {
                 <div className="mb-6">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <span className="text-4xl font-bold text-accent">
-                      ${getPlanPrice('plus', isAnnual) || (isAnnual ? '8.00' : '9.99')}
+                      ${getPlanPrice('Plus', isAnnual) || (isAnnual ? '8.00' : '9.99')}
                     </span>
                   </div>
                   <span className="text-secondary">/{isAnnual ? 'month' : 'month'}</span>
