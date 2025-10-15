@@ -17,6 +17,7 @@ export default function Navbar() {
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -54,6 +55,29 @@ export default function Navbar() {
       console.error('Failed to logout', error);
     } finally {
       setIsLoggingOut(false);
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    try {
+      setIsDemoLoading(true);
+      
+      // Login with demo credentials
+      const result = await authService.login({
+        email: 'demo@mail.com',
+        password: 'Test*1234!',
+      });
+      
+      // Update user state
+      setUser(result.user);
+      
+      // Redirect to app
+      window.location.href = '/app';
+    } catch (error) {
+      console.error('Failed to login with demo account', error);
+      alert('Failed to login with demo account. Please try again.');
+    } finally {
+      setIsDemoLoading(false);
     }
   };
 
@@ -129,6 +153,13 @@ export default function Navbar() {
             ) : (
               // Show login/signup for non-authenticated users
               <>
+                <button
+                  onClick={handleDemoLogin}
+                  disabled={isDemoLoading}
+                  className="cursor-pointer bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-md transition-colors duration-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isDemoLoading ? 'Loading...' : 'Demo'}
+                </button>
                 <Link
                   href="/auth/login"
                   className="text-text-primary hover:text-accent transition-colors duration-200 px-3 py-2 rounded-md text-sm font-medium"
@@ -220,6 +251,13 @@ export default function Navbar() {
                 </>
               ) : (
                 <>
+                  <button
+                    onClick={handleDemoLogin}
+                    disabled={isDemoLoading}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-3 rounded-md transition-colors duration-200 text-sm block text-center w-full mx-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isDemoLoading ? 'Loading...' : 'Demo'}
+                  </button>
                   <Link
                     href="/auth/login"
                     className="text-text-primary hover:text-accent block px-3 py-2 rounded-md text-base font-medium transition-colors duration-200"
