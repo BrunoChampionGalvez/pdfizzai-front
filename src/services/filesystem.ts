@@ -15,6 +15,8 @@ export interface File {
   folder_id: string | null;
   upload_date: string;
   storage_path: string;
+  google_storage_url?: string;
+  expires?: number;
   textExtracted?: boolean;
   processed?: boolean;
 }

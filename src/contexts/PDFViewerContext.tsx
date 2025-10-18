@@ -16,6 +16,8 @@ export interface AppFile {
   name: string;
   type: 'pdf';
   storage_path: string;
+  google_storage_url?: string;
+  expires?: number;
   size: number;
   content?: string;
   processed: boolean;
@@ -90,6 +92,22 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
   // Store reference to file list refresh handler
   const fileListRefreshHandler = React.useRef<(() => void) | null>(null);
 
+  const resolveFileUrl = useCallback(
+    (file: (Partial<AppFile> & { google_storage_url?: string }) | null | undefined) => {
+      if (!file) {
+        return null;
+      }
+      if (file.google_storage_url) {
+        return file.google_storage_url;
+      }
+      if (file.storage_path) {
+        return `https://storage.googleapis.com/refdoc-ai-bucket/${file.storage_path}`;
+      }
+      return null;
+    },
+    [],
+  );
+
   const handleShowFile = useCallback(async (fileId: string, textSnippet: string) => {
     if (!fileId) {
       console.error('Invalid file ID provided to handleShowFile');
@@ -129,10 +147,9 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       const { data }: {data: AppFile | null} = await api.get(`/api/files/${fileId}`);
       
       // Ensure we have a valid path before setting it
-      if (data && data.storage_path) {
-        console.log('File path from API:', data.storage_path);
-        // Make sure the path is a string and not undefined
-        const filePath = `https://storage.googleapis.com/refdoc-ai-bucket/${data.storage_path}`;
+      const filePath = resolveFileUrl(data as Partial<AppFile> & { google_storage_url?: string });
+      if (data && filePath) {
+        console.log('File path from API:', filePath);
         console.log('Setting current file path:', filePath);
         
         setState(prevState => ({
@@ -159,7 +176,7 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
         error: error instanceof Error ? error.message : 'Failed to fetch file',
       }));
     }
-  }, [state.currentFileId, state.currentFilePath]);
+  }, [resolveFileUrl, state.currentFileId, state.currentFilePath]);
 
   const handleHideFileDisplay = useCallback(() => {
     setState(prevState => ({
@@ -199,12 +216,11 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
           
           // If we have a selected paper, update it with the fresh data
           if (response.data) {
+            const resolvedUrl = resolveFileUrl(response.data);
             setState(currentState => ({
               ...currentState,
               currentFileId: response.data.id,
-              currentFilePath: response.data.storage_path 
-                ? `https://storage.googleapis.com/refdoc-ai-bucket/${response.data.storage_path}` 
-                : null,
+              currentFilePath: resolvedUrl,
               currentFile: response.data,
             }));
           }
@@ -219,7 +235,7 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       
       return prevState;
     });
-  }, []);
+  }, [resolveFileUrl]);
 
   const handleTextExtractionComplete = useCallback((success: boolean) => {
     console.log('PDFViewerContext: Text extraction completed with success:', success);
