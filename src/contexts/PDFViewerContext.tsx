@@ -103,7 +103,9 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       // Strategy: Use GCS signed URL directly for best pdf.js compatibility
       // The signed URLs are temporary (1h expiration) and safe to expose to client
       if (file.google_storage_url) {
-        console.log('[PDFViewer] Using direct GCS signed URL for optimal pdf.js loading');
+        console.log('[PDFViewer] ✅ Using DIRECT GCS signed URL (no proxy)');
+        console.log('[PDFViewer] 📎 PDF URL:', file.google_storage_url);
+        console.log('[PDFViewer] 🧪 TEST: Copy this URL and open it in a new browser tab to verify PDF is not corrupted');
         return file.google_storage_url;
       }
 
@@ -157,8 +159,18 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
       // Ensure we have a valid path before setting it
       const filePath = resolveFileUrl(data as Partial<AppFile> & { google_storage_url?: string });
       if (data && filePath) {
-        console.log('File path from API:', filePath);
-        console.log('Setting current file path:', filePath);
+        console.log('====================================');
+        console.log('📄 PDF FILE LOADING DEBUG INFO:');
+        console.log('====================================');
+        console.log('File ID:', fileId);
+        console.log('File name:', data.name);
+        console.log('Has google_storage_url:', !!data.google_storage_url);
+        console.log('Resolved URL:', filePath);
+        console.log('URL Type:', filePath.includes('pdf-proxy') ? '⚠️ PROXY (unexpected!)' : '✅ DIRECT GCS');
+        console.log('====================================');
+        console.log('🔗 COPY THIS URL TO TEST IN BROWSER:');
+        console.log(filePath);
+        console.log('====================================');
         
         setState(prevState => ({
           ...prevState,
