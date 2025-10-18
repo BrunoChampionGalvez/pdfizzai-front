@@ -100,13 +100,10 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
         return null;
       }
 
+      // Strategy: Use GCS signed URL directly for best pdf.js compatibility
+      // The signed URLs are temporary (1h expiration) and safe to expose to client
       if (file.google_storage_url) {
-        if (apiBaseUrl) {
-          const normalizedBase = apiBaseUrl.endsWith('/')
-            ? apiBaseUrl.slice(0, -1)
-            : apiBaseUrl;
-          return `${normalizedBase}/api/files/pdf-proxy?url=${encodeURIComponent(file.google_storage_url)}`;
-        }
+        console.log('[PDFViewer] Using direct GCS signed URL for optimal pdf.js loading');
         return file.google_storage_url;
       }
 
@@ -116,7 +113,7 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
 
       return null;
     },
-    [apiBaseUrl],
+    [],
   );
 
   const handleShowFile = useCallback(async (fileId: string, textSnippet: string) => {
