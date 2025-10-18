@@ -92,20 +92,31 @@ export const PDFViewerProvider: React.FC<PDFViewerProviderProps> = ({ children }
   // Store reference to file list refresh handler
   const fileListRefreshHandler = React.useRef<(() => void) | null>(null);
 
+  const apiBaseUrl = useMemo(() => api.defaults.baseURL ?? '', []);
+
   const resolveFileUrl = useCallback(
     (file: (Partial<AppFile> & { google_storage_url?: string }) | null | undefined) => {
       if (!file) {
         return null;
       }
+
       if (file.google_storage_url) {
+        if (apiBaseUrl) {
+          const normalizedBase = apiBaseUrl.endsWith('/')
+            ? apiBaseUrl.slice(0, -1)
+            : apiBaseUrl;
+          return `${normalizedBase}/api/files/pdf-proxy?url=${encodeURIComponent(file.google_storage_url)}`;
+        }
         return file.google_storage_url;
       }
+
       if (file.storage_path) {
         return `https://storage.googleapis.com/refdoc-ai-bucket/${file.storage_path}`;
       }
+
       return null;
     },
-    [],
+    [apiBaseUrl],
   );
 
   const handleShowFile = useCallback(async (fileId: string, textSnippet: string) => {
